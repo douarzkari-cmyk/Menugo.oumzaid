@@ -1,0 +1,2158 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>لوحة تحكم MenuGo</title>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800&display=swap" rel="stylesheet">
+<script>
+// ===== QR Code encoder (Kazuhiko Arase, MIT license) — bundled inline, works fully offline =====
+(function(global){
+'use strict';
+// --- QRMode.js ---
+var QRMode = {
+    MODE_NUMBER :       1 << 0,
+    MODE_ALPHA_NUM :    1 << 1,
+    MODE_8BIT_BYTE :    1 << 2,
+    MODE_KANJI :        1 << 3
+};
+
+// --- QRMath.js ---
+var QRMath = {
+
+	glog : function(n) {
+	
+		if (n < 1) {
+			throw new Error("glog(" + n + ")");
+		}
+		
+		return QRMath.LOG_TABLE[n];
+	},
+	
+	gexp : function(n) {
+	
+		while (n < 0) {
+			n += 255;
+		}
+	
+		while (n >= 256) {
+			n -= 255;
+		}
+	
+		return QRMath.EXP_TABLE[n];
+	},
+	
+	EXP_TABLE : new Array(256),
+	
+	LOG_TABLE : new Array(256)
+
+};
+	
+for (var i = 0; i < 8; i++) {
+	QRMath.EXP_TABLE[i] = 1 << i;
+}
+for (var i = 8; i < 256; i++) {
+	QRMath.EXP_TABLE[i] = QRMath.EXP_TABLE[i - 4]
+		^ QRMath.EXP_TABLE[i - 5]
+		^ QRMath.EXP_TABLE[i - 6]
+		^ QRMath.EXP_TABLE[i - 8];
+}
+for (var i = 0; i < 255; i++) {
+	QRMath.LOG_TABLE[QRMath.EXP_TABLE[i] ] = i;
+}
+
+var QRMath = QRMath;
+
+// --- QRErrorCorrectLevel.js ---
+var QRErrorCorrectLevel = {
+	L : 1,
+	M : 0,
+	Q : 3,
+	H : 2
+};
+
+
+// --- QRMaskPattern.js ---
+var QRMaskPattern = {
+	PATTERN000 : 0,
+	PATTERN001 : 1,
+	PATTERN010 : 2,
+	PATTERN011 : 3,
+	PATTERN100 : 4,
+	PATTERN101 : 5,
+	PATTERN110 : 6,
+	PATTERN111 : 7
+};
+
+// --- QR8bitByte.js ---
+
+function QR8bitByte(data) {
+	this.mode = QRMode.MODE_8BIT_BYTE;
+	this.data = data;
+}
+
+QR8bitByte.prototype = {
+
+	getLength : function() {
+		return this.data.length;
+	},
+	
+	write : function(buffer) {
+		for (var i = 0; i < this.data.length; i++) {
+			// not JIS ...
+			buffer.put(this.data.charCodeAt(i), 8);
+		}
+	}
+};
+
+var QR8bitByte = QR8bitByte;
+
+// --- QRPolynomial.js ---
+
+function QRPolynomial(num, shift) {
+	if (num.length === undefined) {
+		throw new Error(num.length + "/" + shift);
+	}
+
+	var offset = 0;
+
+	while (offset < num.length && num[offset] === 0) {
+		offset++;
+	}
+
+	this.num = new Array(num.length - offset + shift);
+	for (var i = 0; i < num.length - offset; i++) {
+		this.num[i] = num[i + offset];
+	}
+}
+
+QRPolynomial.prototype = {
+
+	get : function(index) {
+		return this.num[index];
+	},
+	
+	getLength : function() {
+		return this.num.length;
+	},
+	
+	multiply : function(e) {
+	
+		var num = new Array(this.getLength() + e.getLength() - 1);
+	
+		for (var i = 0; i < this.getLength(); i++) {
+			for (var j = 0; j < e.getLength(); j++) {
+				num[i + j] ^= QRMath.gexp(QRMath.glog(this.get(i) ) + QRMath.glog(e.get(j) ) );
+			}
+		}
+	
+		return new QRPolynomial(num, 0);
+	},
+	
+	mod : function(e) {
+	
+		if (this.getLength() - e.getLength() < 0) {
+			return this;
+		}
+	
+		var ratio = QRMath.glog(this.get(0) ) - QRMath.glog(e.get(0) );
+	
+		var num = new Array(this.getLength() );
+		
+		for (var i = 0; i < this.getLength(); i++) {
+			num[i] = this.get(i);
+		}
+		
+		for (var x = 0; x < e.getLength(); x++) {
+			num[x] ^= QRMath.gexp(QRMath.glog(e.get(x) ) + ratio);
+		}
+	
+		// recursive call
+		return new QRPolynomial(num, 0).mod(e);
+	}
+};
+
+var QRPolynomial = QRPolynomial;
+
+// --- QRRSBlock.js ---
+
+function QRRSBlock(totalCount, dataCount) {
+	this.totalCount = totalCount;
+	this.dataCount  = dataCount;
+}
+
+QRRSBlock.RS_BLOCK_TABLE = [
+
+	// L
+	// M
+	// Q
+	// H
+
+	// 1
+	[1, 26, 19],
+	[1, 26, 16],
+	[1, 26, 13],
+	[1, 26, 9],
+	
+	// 2
+	[1, 44, 34],
+	[1, 44, 28],
+	[1, 44, 22],
+	[1, 44, 16],
+
+	// 3
+	[1, 70, 55],
+	[1, 70, 44],
+	[2, 35, 17],
+	[2, 35, 13],
+
+	// 4		
+	[1, 100, 80],
+	[2, 50, 32],
+	[2, 50, 24],
+	[4, 25, 9],
+	
+	// 5
+	[1, 134, 108],
+	[2, 67, 43],
+	[2, 33, 15, 2, 34, 16],
+	[2, 33, 11, 2, 34, 12],
+	
+	// 6
+	[2, 86, 68],
+	[4, 43, 27],
+	[4, 43, 19],
+	[4, 43, 15],
+	
+	// 7		
+	[2, 98, 78],
+	[4, 49, 31],
+	[2, 32, 14, 4, 33, 15],
+	[4, 39, 13, 1, 40, 14],
+	
+	// 8
+	[2, 121, 97],
+	[2, 60, 38, 2, 61, 39],
+	[4, 40, 18, 2, 41, 19],
+	[4, 40, 14, 2, 41, 15],
+	
+	// 9
+	[2, 146, 116],
+	[3, 58, 36, 2, 59, 37],
+	[4, 36, 16, 4, 37, 17],
+	[4, 36, 12, 4, 37, 13],
+	
+	// 10		
+	[2, 86, 68, 2, 87, 69],
+	[4, 69, 43, 1, 70, 44],
+	[6, 43, 19, 2, 44, 20],
+	[6, 43, 15, 2, 44, 16],
+
+	// 11
+	[4, 101, 81],
+	[1, 80, 50, 4, 81, 51],
+	[4, 50, 22, 4, 51, 23],
+	[3, 36, 12, 8, 37, 13],
+
+	// 12
+	[2, 116, 92, 2, 117, 93],
+	[6, 58, 36, 2, 59, 37],
+	[4, 46, 20, 6, 47, 21],
+	[7, 42, 14, 4, 43, 15],
+
+	// 13
+	[4, 133, 107],
+	[8, 59, 37, 1, 60, 38],
+	[8, 44, 20, 4, 45, 21],
+	[12, 33, 11, 4, 34, 12],
+
+	// 14
+	[3, 145, 115, 1, 146, 116],
+	[4, 64, 40, 5, 65, 41],
+	[11, 36, 16, 5, 37, 17],
+	[11, 36, 12, 5, 37, 13],
+
+	// 15
+	[5, 109, 87, 1, 110, 88],
+	[5, 65, 41, 5, 66, 42],
+	[5, 54, 24, 7, 55, 25],
+	[11, 36, 12],
+
+	// 16
+	[5, 122, 98, 1, 123, 99],
+	[7, 73, 45, 3, 74, 46],
+	[15, 43, 19, 2, 44, 20],
+	[3, 45, 15, 13, 46, 16],
+
+	// 17
+	[1, 135, 107, 5, 136, 108],
+	[10, 74, 46, 1, 75, 47],
+	[1, 50, 22, 15, 51, 23],
+	[2, 42, 14, 17, 43, 15],
+
+	// 18
+	[5, 150, 120, 1, 151, 121],
+	[9, 69, 43, 4, 70, 44],
+	[17, 50, 22, 1, 51, 23],
+	[2, 42, 14, 19, 43, 15],
+
+	// 19
+	[3, 141, 113, 4, 142, 114],
+	[3, 70, 44, 11, 71, 45],
+	[17, 47, 21, 4, 48, 22],
+	[9, 39, 13, 16, 40, 14],
+
+	// 20
+	[3, 135, 107, 5, 136, 108],
+	[3, 67, 41, 13, 68, 42],
+	[15, 54, 24, 5, 55, 25],
+	[15, 43, 15, 10, 44, 16],
+
+	// 21
+	[4, 144, 116, 4, 145, 117],
+	[17, 68, 42],
+	[17, 50, 22, 6, 51, 23],
+	[19, 46, 16, 6, 47, 17],
+
+	// 22
+	[2, 139, 111, 7, 140, 112],
+	[17, 74, 46],
+	[7, 54, 24, 16, 55, 25],
+	[34, 37, 13],
+
+	// 23
+	[4, 151, 121, 5, 152, 122],
+	[4, 75, 47, 14, 76, 48],
+	[11, 54, 24, 14, 55, 25],
+	[16, 45, 15, 14, 46, 16],
+
+	// 24
+	[6, 147, 117, 4, 148, 118],
+	[6, 73, 45, 14, 74, 46],
+	[11, 54, 24, 16, 55, 25],
+	[30, 46, 16, 2, 47, 17],
+
+	// 25
+	[8, 132, 106, 4, 133, 107],
+	[8, 75, 47, 13, 76, 48],
+	[7, 54, 24, 22, 55, 25],
+	[22, 45, 15, 13, 46, 16],
+
+	// 26
+	[10, 142, 114, 2, 143, 115],
+	[19, 74, 46, 4, 75, 47],
+	[28, 50, 22, 6, 51, 23],
+	[33, 46, 16, 4, 47, 17],
+
+	// 27
+	[8, 152, 122, 4, 153, 123],
+	[22, 73, 45, 3, 74, 46],
+	[8, 53, 23, 26, 54, 24],
+	[12, 45, 15, 28, 46, 16],
+
+	// 28
+	[3, 147, 117, 10, 148, 118],
+	[3, 73, 45, 23, 74, 46],
+	[4, 54, 24, 31, 55, 25],
+	[11, 45, 15, 31, 46, 16],
+
+	// 29
+	[7, 146, 116, 7, 147, 117],
+	[21, 73, 45, 7, 74, 46],
+	[1, 53, 23, 37, 54, 24],
+	[19, 45, 15, 26, 46, 16],
+
+	// 30
+	[5, 145, 115, 10, 146, 116],
+	[19, 75, 47, 10, 76, 48],
+	[15, 54, 24, 25, 55, 25],
+	[23, 45, 15, 25, 46, 16],
+
+	// 31
+	[13, 145, 115, 3, 146, 116],
+	[2, 74, 46, 29, 75, 47],
+	[42, 54, 24, 1, 55, 25],
+	[23, 45, 15, 28, 46, 16],
+
+	// 32
+	[17, 145, 115],
+	[10, 74, 46, 23, 75, 47],
+	[10, 54, 24, 35, 55, 25],
+	[19, 45, 15, 35, 46, 16],
+
+	// 33
+	[17, 145, 115, 1, 146, 116],
+	[14, 74, 46, 21, 75, 47],
+	[29, 54, 24, 19, 55, 25],
+	[11, 45, 15, 46, 46, 16],
+
+	// 34
+	[13, 145, 115, 6, 146, 116],
+	[14, 74, 46, 23, 75, 47],
+	[44, 54, 24, 7, 55, 25],
+	[59, 46, 16, 1, 47, 17],
+
+	// 35
+	[12, 151, 121, 7, 152, 122],
+	[12, 75, 47, 26, 76, 48],
+	[39, 54, 24, 14, 55, 25],
+	[22, 45, 15, 41, 46, 16],
+
+	// 36
+	[6, 151, 121, 14, 152, 122],
+	[6, 75, 47, 34, 76, 48],
+	[46, 54, 24, 10, 55, 25],
+	[2, 45, 15, 64, 46, 16],
+
+	// 37
+	[17, 152, 122, 4, 153, 123],
+	[29, 74, 46, 14, 75, 47],
+	[49, 54, 24, 10, 55, 25],
+	[24, 45, 15, 46, 46, 16],
+
+	// 38
+	[4, 152, 122, 18, 153, 123],
+	[13, 74, 46, 32, 75, 47],
+	[48, 54, 24, 14, 55, 25],
+	[42, 45, 15, 32, 46, 16],
+
+	// 39
+	[20, 147, 117, 4, 148, 118],
+	[40, 75, 47, 7, 76, 48],
+	[43, 54, 24, 22, 55, 25],
+	[10, 45, 15, 67, 46, 16],
+
+	// 40
+	[19, 148, 118, 6, 149, 119],
+	[18, 75, 47, 31, 76, 48],
+	[34, 54, 24, 34, 55, 25],
+	[20, 45, 15, 61, 46, 16]
+];
+
+QRRSBlock.getRSBlocks = function(typeNumber, errorCorrectLevel) {
+	
+	var rsBlock = QRRSBlock.getRsBlockTable(typeNumber, errorCorrectLevel);
+	
+	if (rsBlock === undefined) {
+		throw new Error("bad rs block @ typeNumber:" + typeNumber + "/errorCorrectLevel:" + errorCorrectLevel);
+	}
+
+	var length = rsBlock.length / 3;
+	
+	var list = [];
+	
+	for (var i = 0; i < length; i++) {
+
+		var count = rsBlock[i * 3 + 0];
+		var totalCount = rsBlock[i * 3 + 1];
+		var dataCount  = rsBlock[i * 3 + 2];
+
+		for (var j = 0; j < count; j++) {
+			list.push(new QRRSBlock(totalCount, dataCount) );	
+		}
+	}
+	
+	return list;
+};
+
+QRRSBlock.getRsBlockTable = function(typeNumber, errorCorrectLevel) {
+
+	switch(errorCorrectLevel) {
+	case QRErrorCorrectLevel.L :
+		return QRRSBlock.RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 0];
+	case QRErrorCorrectLevel.M :
+		return QRRSBlock.RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 1];
+	case QRErrorCorrectLevel.Q :
+		return QRRSBlock.RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 2];
+	case QRErrorCorrectLevel.H :
+		return QRRSBlock.RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 3];
+	default :
+		return undefined;
+	}
+};
+
+var QRRSBlock = QRRSBlock;
+
+// --- QRBitBuffer.js ---
+function QRBitBuffer() {
+	this.buffer = [];
+	this.length = 0;
+}
+
+QRBitBuffer.prototype = {
+
+	get : function(index) {
+		var bufIndex = Math.floor(index / 8);
+		return ( (this.buffer[bufIndex] >>> (7 - index % 8) ) & 1) == 1;
+	},
+	
+	put : function(num, length) {
+		for (var i = 0; i < length; i++) {
+			this.putBit( ( (num >>> (length - i - 1) ) & 1) == 1);
+		}
+	},
+	
+	getLengthInBits : function() {
+		return this.length;
+	},
+	
+	putBit : function(bit) {
+	
+		var bufIndex = Math.floor(this.length / 8);
+		if (this.buffer.length <= bufIndex) {
+			this.buffer.push(0);
+		}
+	
+		if (bit) {
+			this.buffer[bufIndex] |= (0x80 >>> (this.length % 8) );
+		}
+	
+		this.length++;
+	}
+};
+
+var QRBitBuffer = QRBitBuffer;
+
+// --- QRUtil.js ---
+
+var QRUtil = {
+
+    PATTERN_POSITION_TABLE : [
+        [],
+        [6, 18],
+        [6, 22],
+        [6, 26],
+        [6, 30],
+        [6, 34],
+        [6, 22, 38],
+        [6, 24, 42],
+        [6, 26, 46],
+        [6, 28, 50],
+        [6, 30, 54],        
+        [6, 32, 58],
+        [6, 34, 62],
+        [6, 26, 46, 66],
+        [6, 26, 48, 70],
+        [6, 26, 50, 74],
+        [6, 30, 54, 78],
+        [6, 30, 56, 82],
+        [6, 30, 58, 86],
+        [6, 34, 62, 90],
+        [6, 28, 50, 72, 94],
+        [6, 26, 50, 74, 98],
+        [6, 30, 54, 78, 102],
+        [6, 28, 54, 80, 106],
+        [6, 32, 58, 84, 110],
+        [6, 30, 58, 86, 114],
+        [6, 34, 62, 90, 118],
+        [6, 26, 50, 74, 98, 122],
+        [6, 30, 54, 78, 102, 126],
+        [6, 26, 52, 78, 104, 130],
+        [6, 30, 56, 82, 108, 134],
+        [6, 34, 60, 86, 112, 138],
+        [6, 30, 58, 86, 114, 142],
+        [6, 34, 62, 90, 118, 146],
+        [6, 30, 54, 78, 102, 126, 150],
+        [6, 24, 50, 76, 102, 128, 154],
+        [6, 28, 54, 80, 106, 132, 158],
+        [6, 32, 58, 84, 110, 136, 162],
+        [6, 26, 54, 82, 110, 138, 166],
+        [6, 30, 58, 86, 114, 142, 170]
+    ],
+
+    G15 : (1 << 10) | (1 << 8) | (1 << 5) | (1 << 4) | (1 << 2) | (1 << 1) | (1 << 0),
+    G18 : (1 << 12) | (1 << 11) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 5) | (1 << 2) | (1 << 0),
+    G15_MASK : (1 << 14) | (1 << 12) | (1 << 10)    | (1 << 4) | (1 << 1),
+
+    getBCHTypeInfo : function(data) {
+        var d = data << 10;
+        while (QRUtil.getBCHDigit(d) - QRUtil.getBCHDigit(QRUtil.G15) >= 0) {
+            d ^= (QRUtil.G15 << (QRUtil.getBCHDigit(d) - QRUtil.getBCHDigit(QRUtil.G15) ) );    
+        }
+        return ( (data << 10) | d) ^ QRUtil.G15_MASK;
+    },
+
+    getBCHTypeNumber : function(data) {
+        var d = data << 12;
+        while (QRUtil.getBCHDigit(d) - QRUtil.getBCHDigit(QRUtil.G18) >= 0) {
+            d ^= (QRUtil.G18 << (QRUtil.getBCHDigit(d) - QRUtil.getBCHDigit(QRUtil.G18) ) );    
+        }
+        return (data << 12) | d;
+    },
+
+    getBCHDigit : function(data) {
+
+        var digit = 0;
+
+        while (data !== 0) {
+            digit++;
+            data >>>= 1;
+        }
+
+        return digit;
+    },
+
+    getPatternPosition : function(typeNumber) {
+        return QRUtil.PATTERN_POSITION_TABLE[typeNumber - 1];
+    },
+
+    getMask : function(maskPattern, i, j) {
+        
+        switch (maskPattern) {
+            
+        case QRMaskPattern.PATTERN000 : return (i + j) % 2 === 0;
+        case QRMaskPattern.PATTERN001 : return i % 2 === 0;
+        case QRMaskPattern.PATTERN010 : return j % 3 === 0;
+        case QRMaskPattern.PATTERN011 : return (i + j) % 3 === 0;
+        case QRMaskPattern.PATTERN100 : return (Math.floor(i / 2) + Math.floor(j / 3) ) % 2 === 0;
+        case QRMaskPattern.PATTERN101 : return (i * j) % 2 + (i * j) % 3 === 0;
+        case QRMaskPattern.PATTERN110 : return ( (i * j) % 2 + (i * j) % 3) % 2 === 0;
+        case QRMaskPattern.PATTERN111 : return ( (i * j) % 3 + (i + j) % 2) % 2 === 0;
+
+        default :
+            throw new Error("bad maskPattern:" + maskPattern);
+        }
+    },
+
+    getErrorCorrectPolynomial : function(errorCorrectLength) {
+
+        var a = new QRPolynomial([1], 0);
+
+        for (var i = 0; i < errorCorrectLength; i++) {
+            a = a.multiply(new QRPolynomial([1, QRMath.gexp(i)], 0) );
+        }
+
+        return a;
+    },
+
+    getLengthInBits : function(mode, type) {
+
+        if (1 <= type && type < 10) {
+
+            // 1 - 9
+
+            switch(mode) {
+            case QRMode.MODE_NUMBER     : return 10;
+            case QRMode.MODE_ALPHA_NUM  : return 9;
+            case QRMode.MODE_8BIT_BYTE  : return 8;
+            case QRMode.MODE_KANJI      : return 8;
+            default :
+                throw new Error("mode:" + mode);
+            }
+
+        } else if (type < 27) {
+
+            // 10 - 26
+
+            switch(mode) {
+            case QRMode.MODE_NUMBER     : return 12;
+            case QRMode.MODE_ALPHA_NUM  : return 11;
+            case QRMode.MODE_8BIT_BYTE  : return 16;
+            case QRMode.MODE_KANJI      : return 10;
+            default :
+                throw new Error("mode:" + mode);
+            }
+
+        } else if (type < 41) {
+
+            // 27 - 40
+
+            switch(mode) {
+            case QRMode.MODE_NUMBER     : return 14;
+            case QRMode.MODE_ALPHA_NUM  : return 13;
+            case QRMode.MODE_8BIT_BYTE  : return 16;
+            case QRMode.MODE_KANJI      : return 12;
+            default :
+                throw new Error("mode:" + mode);
+            }
+
+        } else {
+            throw new Error("type:" + type);
+        }
+    },
+
+    getLostPoint : function(qrCode) {
+        
+        var moduleCount = qrCode.getModuleCount();
+        var lostPoint = 0;
+        var row = 0; 
+        var col = 0;
+
+        
+        // LEVEL1
+        
+        for (row = 0; row < moduleCount; row++) {
+
+            for (col = 0; col < moduleCount; col++) {
+
+                var sameCount = 0;
+                var dark = qrCode.isDark(row, col);
+
+                for (var r = -1; r <= 1; r++) {
+
+                    if (row + r < 0 || moduleCount <= row + r) {
+                        continue;
+                    }
+
+                    for (var c = -1; c <= 1; c++) {
+
+                        if (col + c < 0 || moduleCount <= col + c) {
+                            continue;
+                        }
+
+                        if (r === 0 && c === 0) {
+                            continue;
+                        }
+
+                        if (dark === qrCode.isDark(row + r, col + c) ) {
+                            sameCount++;
+                        }
+                    }
+                }
+
+                if (sameCount > 5) {
+                    lostPoint += (3 + sameCount - 5);
+                }
+            }
+        }
+
+        // LEVEL2
+
+        for (row = 0; row < moduleCount - 1; row++) {
+            for (col = 0; col < moduleCount - 1; col++) {
+                var count = 0;
+                if (qrCode.isDark(row,     col    ) ) count++;
+                if (qrCode.isDark(row + 1, col    ) ) count++;
+                if (qrCode.isDark(row,     col + 1) ) count++;
+                if (qrCode.isDark(row + 1, col + 1) ) count++;
+                if (count === 0 || count === 4) {
+                    lostPoint += 3;
+                }
+            }
+        }
+
+        // LEVEL3
+
+        for (row = 0; row < moduleCount; row++) {
+            for (col = 0; col < moduleCount - 6; col++) {
+                if (qrCode.isDark(row, col) && 
+                        !qrCode.isDark(row, col + 1) && 
+                         qrCode.isDark(row, col + 2) && 
+                         qrCode.isDark(row, col + 3) && 
+                         qrCode.isDark(row, col + 4) && 
+                        !qrCode.isDark(row, col + 5) && 
+                         qrCode.isDark(row, col + 6) ) {
+                    lostPoint += 40;
+                }
+            }
+        }
+
+        for (col = 0; col < moduleCount; col++) {
+            for (row = 0; row < moduleCount - 6; row++) {
+                if (qrCode.isDark(row, col) &&
+                        !qrCode.isDark(row + 1, col) &&
+                         qrCode.isDark(row + 2, col) &&
+                         qrCode.isDark(row + 3, col) &&
+                         qrCode.isDark(row + 4, col) &&
+                        !qrCode.isDark(row + 5, col) &&
+                         qrCode.isDark(row + 6, col) ) {
+                    lostPoint += 40;
+                }
+            }
+        }
+
+        // LEVEL4
+        
+        var darkCount = 0;
+
+        for (col = 0; col < moduleCount; col++) {
+            for (row = 0; row < moduleCount; row++) {
+                if (qrCode.isDark(row, col) ) {
+                    darkCount++;
+                }
+            }
+        }
+        
+        var ratio = Math.abs(100 * darkCount / moduleCount / moduleCount - 50) / 5;
+        lostPoint += ratio * 10;
+
+        return lostPoint;       
+    }
+
+};
+
+var QRUtil = QRUtil;
+
+// --- index.js ---
+//---------------------------------------------------------------------
+// QRCode for JavaScript
+//
+// Copyright (c) 2009 Kazuhiko Arase
+//
+// URL: http://www.d-project.com/
+//
+// Licensed under the MIT license:
+//   http://www.opensource.org/licenses/mit-license.php
+//
+// The word "QR Code" is registered trademark of 
+// DENSO WAVE INCORPORATED
+//   http://www.denso-wave.com/qrcode/faqpatent-e.html
+//
+//---------------------------------------------------------------------
+// Modified to work in node for this project (and some refactoring)
+//---------------------------------------------------------------------
+
+
+function QRCode(typeNumber, errorCorrectLevel) {
+	this.typeNumber = typeNumber;
+	this.errorCorrectLevel = errorCorrectLevel;
+	this.modules = null;
+	this.moduleCount = 0;
+	this.dataCache = null;
+	this.dataList = [];
+}
+
+QRCode.prototype = {
+	
+	addData : function(data) {
+		var newData = new QR8bitByte(data);
+		this.dataList.push(newData);
+		this.dataCache = null;
+	},
+	
+	isDark : function(row, col) {
+		if (row < 0 || this.moduleCount <= row || col < 0 || this.moduleCount <= col) {
+			throw new Error(row + "," + col);
+		}
+		return this.modules[row][col];
+	},
+
+	getModuleCount : function() {
+		return this.moduleCount;
+	},
+	
+	make : function() {
+		// Calculate automatically typeNumber if provided is < 1
+		if (this.typeNumber < 1 ){
+			var typeNumber = 1;
+			for (typeNumber = 1; typeNumber < 40; typeNumber++) {
+				var rsBlocks = QRRSBlock.getRSBlocks(typeNumber, this.errorCorrectLevel);
+
+				var buffer = new QRBitBuffer();
+				var totalDataCount = 0;
+				for (var i = 0; i < rsBlocks.length; i++) {
+					totalDataCount += rsBlocks[i].dataCount;
+				}
+
+				for (var x = 0; x < this.dataList.length; x++) {
+					var data = this.dataList[x];
+					buffer.put(data.mode, 4);
+					buffer.put(data.getLength(), QRUtil.getLengthInBits(data.mode, typeNumber) );
+					data.write(buffer);
+				}
+				if (buffer.getLengthInBits() <= totalDataCount * 8)
+					break;
+			}
+			this.typeNumber = typeNumber;
+		}
+		this.makeImpl(false, this.getBestMaskPattern() );
+	},
+	
+	makeImpl : function(test, maskPattern) {
+		
+		this.moduleCount = this.typeNumber * 4 + 17;
+		this.modules = new Array(this.moduleCount);
+		
+		for (var row = 0; row < this.moduleCount; row++) {
+			
+			this.modules[row] = new Array(this.moduleCount);
+			
+			for (var col = 0; col < this.moduleCount; col++) {
+				this.modules[row][col] = null;//(col + row) % 3;
+			}
+		}
+	
+		this.setupPositionProbePattern(0, 0);
+		this.setupPositionProbePattern(this.moduleCount - 7, 0);
+		this.setupPositionProbePattern(0, this.moduleCount - 7);
+		this.setupPositionAdjustPattern();
+		this.setupTimingPattern();
+		this.setupTypeInfo(test, maskPattern);
+		
+		if (this.typeNumber >= 7) {
+			this.setupTypeNumber(test);
+		}
+	
+		if (this.dataCache === null) {
+			this.dataCache = QRCode.createData(this.typeNumber, this.errorCorrectLevel, this.dataList);
+		}
+	
+		this.mapData(this.dataCache, maskPattern);
+	},
+
+	setupPositionProbePattern : function(row, col)  {
+		
+		for (var r = -1; r <= 7; r++) {
+			
+			if (row + r <= -1 || this.moduleCount <= row + r) continue;
+			
+			for (var c = -1; c <= 7; c++) {
+				
+				if (col + c <= -1 || this.moduleCount <= col + c) continue;
+				
+				if ( (0 <= r && r <= 6 && (c === 0 || c === 6) ) || 
+                     (0 <= c && c <= 6 && (r === 0 || r === 6) ) || 
+                     (2 <= r && r <= 4 && 2 <= c && c <= 4) ) {
+					this.modules[row + r][col + c] = true;
+				} else {
+					this.modules[row + r][col + c] = false;
+				}
+			}		
+		}		
+	},
+	
+	getBestMaskPattern : function() {
+	
+		var minLostPoint = 0;
+		var pattern = 0;
+	
+		for (var i = 0; i < 8; i++) {
+			
+			this.makeImpl(true, i);
+	
+			var lostPoint = QRUtil.getLostPoint(this);
+	
+			if (i === 0 || minLostPoint >  lostPoint) {
+				minLostPoint = lostPoint;
+				pattern = i;
+			}
+		}
+	
+		return pattern;
+	},
+	
+	createMovieClip : function(target_mc, instance_name, depth) {
+	
+		var qr_mc = target_mc.createEmptyMovieClip(instance_name, depth);
+		var cs = 1;
+	
+		this.make();
+
+		for (var row = 0; row < this.modules.length; row++) {
+			
+			var y = row * cs;
+			
+			for (var col = 0; col < this.modules[row].length; col++) {
+	
+				var x = col * cs;
+				var dark = this.modules[row][col];
+			
+				if (dark) {
+					qr_mc.beginFill(0, 100);
+					qr_mc.moveTo(x, y);
+					qr_mc.lineTo(x + cs, y);
+					qr_mc.lineTo(x + cs, y + cs);
+					qr_mc.lineTo(x, y + cs);
+					qr_mc.endFill();
+				}
+			}
+		}
+		
+		return qr_mc;
+	},
+
+	setupTimingPattern : function() {
+		
+		for (var r = 8; r < this.moduleCount - 8; r++) {
+			if (this.modules[r][6] !== null) {
+				continue;
+			}
+			this.modules[r][6] = (r % 2 === 0);
+		}
+	
+		for (var c = 8; c < this.moduleCount - 8; c++) {
+			if (this.modules[6][c] !== null) {
+				continue;
+			}
+			this.modules[6][c] = (c % 2 === 0);
+		}
+	},
+	
+	setupPositionAdjustPattern : function() {
+	
+		var pos = QRUtil.getPatternPosition(this.typeNumber);
+		
+		for (var i = 0; i < pos.length; i++) {
+		
+			for (var j = 0; j < pos.length; j++) {
+			
+				var row = pos[i];
+				var col = pos[j];
+				
+				if (this.modules[row][col] !== null) {
+					continue;
+				}
+				
+				for (var r = -2; r <= 2; r++) {
+				
+					for (var c = -2; c <= 2; c++) {
+					
+						if (Math.abs(r) === 2 || 
+                            Math.abs(c) === 2 ||
+                            (r === 0 && c === 0) ) {
+							this.modules[row + r][col + c] = true;
+						} else {
+							this.modules[row + r][col + c] = false;
+						}
+					}
+				}
+			}
+		}
+	},
+	
+	setupTypeNumber : function(test) {
+	
+		var bits = QRUtil.getBCHTypeNumber(this.typeNumber);
+        var mod;
+	
+		for (var i = 0; i < 18; i++) {
+			mod = (!test && ( (bits >> i) & 1) === 1);
+			this.modules[Math.floor(i / 3)][i % 3 + this.moduleCount - 8 - 3] = mod;
+		}
+	
+		for (var x = 0; x < 18; x++) {
+			mod = (!test && ( (bits >> x) & 1) === 1);
+			this.modules[x % 3 + this.moduleCount - 8 - 3][Math.floor(x / 3)] = mod;
+		}
+	},
+	
+	setupTypeInfo : function(test, maskPattern) {
+	
+		var data = (this.errorCorrectLevel << 3) | maskPattern;
+		var bits = QRUtil.getBCHTypeInfo(data);
+        var mod;
+	
+		// vertical		
+		for (var v = 0; v < 15; v++) {
+	
+			mod = (!test && ( (bits >> v) & 1) === 1);
+	
+			if (v < 6) {
+				this.modules[v][8] = mod;
+			} else if (v < 8) {
+				this.modules[v + 1][8] = mod;
+			} else {
+				this.modules[this.moduleCount - 15 + v][8] = mod;
+			}
+		}
+	
+		// horizontal
+		for (var h = 0; h < 15; h++) {
+	
+			mod = (!test && ( (bits >> h) & 1) === 1);
+			
+			if (h < 8) {
+				this.modules[8][this.moduleCount - h - 1] = mod;
+			} else if (h < 9) {
+				this.modules[8][15 - h - 1 + 1] = mod;
+			} else {
+				this.modules[8][15 - h - 1] = mod;
+			}
+		}
+	
+		// fixed module
+		this.modules[this.moduleCount - 8][8] = (!test);
+	
+	},
+	
+	mapData : function(data, maskPattern) {
+		
+		var inc = -1;
+		var row = this.moduleCount - 1;
+		var bitIndex = 7;
+		var byteIndex = 0;
+		
+		for (var col = this.moduleCount - 1; col > 0; col -= 2) {
+	
+			if (col === 6) col--;
+	
+			while (true) {
+	
+				for (var c = 0; c < 2; c++) {
+					
+					if (this.modules[row][col - c] === null) {
+						
+						var dark = false;
+	
+						if (byteIndex < data.length) {
+							dark = ( ( (data[byteIndex] >>> bitIndex) & 1) === 1);
+						}
+	
+						var mask = QRUtil.getMask(maskPattern, row, col - c);
+	
+						if (mask) {
+							dark = !dark;
+						}
+						
+						this.modules[row][col - c] = dark;
+						bitIndex--;
+	
+						if (bitIndex === -1) {
+							byteIndex++;
+							bitIndex = 7;
+						}
+					}
+				}
+								
+				row += inc;
+	
+				if (row < 0 || this.moduleCount <= row) {
+					row -= inc;
+					inc = -inc;
+					break;
+				}
+			}
+		}
+		
+	}
+
+};
+
+QRCode.PAD0 = 0xEC;
+QRCode.PAD1 = 0x11;
+
+QRCode.createData = function(typeNumber, errorCorrectLevel, dataList) {
+	
+	var rsBlocks = QRRSBlock.getRSBlocks(typeNumber, errorCorrectLevel);
+	
+	var buffer = new QRBitBuffer();
+	
+	for (var i = 0; i < dataList.length; i++) {
+		var data = dataList[i];
+		buffer.put(data.mode, 4);
+		buffer.put(data.getLength(), QRUtil.getLengthInBits(data.mode, typeNumber) );
+		data.write(buffer);
+	}
+
+	// calc num max data.
+	var totalDataCount = 0;
+	for (var x = 0; x < rsBlocks.length; x++) {
+		totalDataCount += rsBlocks[x].dataCount;
+	}
+
+	if (buffer.getLengthInBits() > totalDataCount * 8) {
+		throw new Error("code length overflow. (" + 
+            buffer.getLengthInBits() + 
+            ">" +  
+            totalDataCount * 8 + 
+            ")");
+	}
+
+	// end code
+	if (buffer.getLengthInBits() + 4 <= totalDataCount * 8) {
+		buffer.put(0, 4);
+	}
+
+	// padding
+	while (buffer.getLengthInBits() % 8 !== 0) {
+		buffer.putBit(false);
+	}
+
+	// padding
+	while (true) {
+		
+		if (buffer.getLengthInBits() >= totalDataCount * 8) {
+			break;
+		}
+		buffer.put(QRCode.PAD0, 8);
+		
+		if (buffer.getLengthInBits() >= totalDataCount * 8) {
+			break;
+		}
+		buffer.put(QRCode.PAD1, 8);
+	}
+
+	return QRCode.createBytes(buffer, rsBlocks);
+};
+
+QRCode.createBytes = function(buffer, rsBlocks) {
+
+	var offset = 0;
+	
+	var maxDcCount = 0;
+	var maxEcCount = 0;
+	
+	var dcdata = new Array(rsBlocks.length);
+	var ecdata = new Array(rsBlocks.length);
+	
+	for (var r = 0; r < rsBlocks.length; r++) {
+
+		var dcCount = rsBlocks[r].dataCount;
+		var ecCount = rsBlocks[r].totalCount - dcCount;
+
+		maxDcCount = Math.max(maxDcCount, dcCount);
+		maxEcCount = Math.max(maxEcCount, ecCount);
+		
+		dcdata[r] = new Array(dcCount);
+		
+		for (var i = 0; i < dcdata[r].length; i++) {
+			dcdata[r][i] = 0xff & buffer.buffer[i + offset];
+		}
+		offset += dcCount;
+		
+		var rsPoly = QRUtil.getErrorCorrectPolynomial(ecCount);
+		var rawPoly = new QRPolynomial(dcdata[r], rsPoly.getLength() - 1);
+
+		var modPoly = rawPoly.mod(rsPoly);
+		ecdata[r] = new Array(rsPoly.getLength() - 1);
+		for (var x = 0; x < ecdata[r].length; x++) {
+            var modIndex = x + modPoly.getLength() - ecdata[r].length;
+			ecdata[r][x] = (modIndex >= 0)? modPoly.get(modIndex) : 0;
+		}
+
+	}
+	
+	var totalCodeCount = 0;
+	for (var y = 0; y < rsBlocks.length; y++) {
+		totalCodeCount += rsBlocks[y].totalCount;
+	}
+
+	var data = new Array(totalCodeCount);
+	var index = 0;
+
+	for (var z = 0; z < maxDcCount; z++) {
+		for (var s = 0; s < rsBlocks.length; s++) {
+			if (z < dcdata[s].length) {
+				data[index++] = dcdata[s][z];
+			}
+		}
+	}
+
+	for (var xx = 0; xx < maxEcCount; xx++) {
+		for (var t = 0; t < rsBlocks.length; t++) {
+			if (xx < ecdata[t].length) {
+				data[index++] = ecdata[t][xx];
+			}
+		}
+	}
+
+	return data;
+
+};
+
+var index = QRCode;
+
+global.QRCodeModel = QRCode;
+global.QRErrorCorrectLevel = QRErrorCorrectLevel;
+})(window);
+
+// ===== Renderer: يرسم كود QR داخل عنصر معين، بلا أي طلب شبكة =====
+function renderQRCodeLocal(container, text, size){
+  container.innerHTML = '';
+  var qr = new window.QRCodeModel(-1, window.QRErrorCorrectLevel.M);
+  qr.addData(text);
+  qr.make();
+  var count = qr.getModuleCount();
+  var canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  var ctx = canvas.getContext('2d');
+  var cell = size / count;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0,0,size,size);
+  ctx.fillStyle = '#000000';
+  for(var r=0;r<count;r++){
+    for(var c=0;c<count;c++){
+      if(qr.isDark(r,c)){
+        ctx.fillRect(Math.round(c*cell), Math.round(r*cell), Math.ceil(cell), Math.ceil(cell));
+      }
+    }
+  }
+  container.appendChild(canvas);
+  return canvas;
+}
+window.renderQRCodeLocal = renderQRCodeLocal;
+</script>
+<style>
+  :root{
+    --bg:#0d1220;
+    --panel:#141b2e;
+    --panel-2:#1b2540;
+    --line:rgba(255,255,255,0.08);
+    --text:#eef1f8;
+    --muted:#8b93ab;
+    --accent:#17d8b0;
+    --accent-dim:rgba(23,216,176,0.14);
+    --warn:#e5734a;
+    --radius:16px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:var(--bg); color:var(--text); font-family:'Tajawal',sans-serif;
+    min-height:100vh;
+  }
+  button{font-family:inherit; cursor:pointer; border:none;}
+  input,textarea,select{font-family:inherit;}
+
+  /* ===== login gate ===== */
+  #gate{
+    position:fixed; inset:0; background:var(--bg); z-index:100;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .gate-card{
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:32px 26px; width:100%; max-width:340px; text-align:center;
+  }
+  .gate-card .logo{
+    width:56px; height:56px; border-radius:14px; background:var(--accent-dim);
+    display:flex; align-items:center; justify-content:center; margin:0 auto 16px;
+    font-size:26px; font-weight:800; color:var(--accent);
+  }
+  .gate-card h2{font-size:19px; margin-bottom:6px;}
+  .gate-card p{color:var(--muted); font-size:13px; margin-bottom:20px;}
+  .gate-card input{
+    width:100%; padding:13px; border-radius:12px; border:1px solid var(--line);
+    background:var(--panel-2); color:var(--text); font-size:16px; text-align:center;
+    letter-spacing:4px; margin-bottom:12px;
+  }
+  .gate-card button{
+    width:100%; padding:13px; border-radius:12px; background:var(--accent); color:#04231d;
+    font-weight:800; font-size:14.5px;
+  }
+  .gate-err{color:var(--warn); font-size:12.5px; margin-top:10px; display:none;}
+  .gate-hint{color:var(--muted); font-size:11.5px; margin-top:14px;}
+
+  /* ===== shell layout ===== */
+  #app{display:none;}
+  #app.show{display:block;}
+  .shell{display:flex; min-height:100vh;}
+
+  .sidebar{
+    width:220px; background:var(--panel); border-left:1px solid var(--line);
+    padding:20px 14px; flex-shrink:0; position:sticky; top:0; height:100vh;
+    display:flex; flex-direction:column; gap:4px;
+  }
+  .brand{display:flex; align-items:center; gap:10px; padding:0 8px 20px; border-bottom:1px solid var(--line); margin-bottom:14px;}
+  .brand .mark{width:34px; height:34px; border-radius:10px; background:var(--accent); display:flex; align-items:center; justify-content:center; font-weight:800; color:#04231d;}
+  .brand b{font-size:15px;}
+  .brand span{display:block; font-size:11px; color:var(--muted);}
+
+  .nav-btn{
+    display:flex; align-items:center; gap:10px; padding:11px 12px; border-radius:10px;
+    background:transparent; color:var(--muted); font-size:13.5px; font-weight:700; text-align:right;
+    width:100%;
+  }
+  .nav-btn:hover{background:var(--panel-2); color:var(--text);}
+  .nav-btn.active{background:var(--accent-dim); color:var(--accent);}
+  .nav-btn .ic{font-size:16px; width:20px; text-align:center;}
+
+  .main{flex:1; min-width:0; padding:24px 22px 100px;}
+  .topbar{display:flex; align-items:center; justify-content:space-between; margin-bottom:22px; flex-wrap:wrap; gap:10px;}
+  .topbar h1{font-size:21px;}
+  .topbar .sub{color:var(--muted); font-size:12.5px; margin-top:3px;}
+  .preview-link{
+    background:var(--panel-2); border:1px solid var(--line); color:var(--text);
+    padding:9px 16px; border-radius:10px; font-size:13px; font-weight:700; display:inline-flex; align-items:center; gap:6px;
+  }
+
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:20px; margin-bottom:16px;
+  }
+  .card h3{font-size:15px; margin-bottom:14px; display:flex; align-items:center; gap:8px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block; font-size:12.5px; color:var(--muted); margin-bottom:6px; font-weight:700;}
+  .field input[type="text"], .field input[type="tel"], .field input[type="url"], .field textarea, .field select{
+    width:100%; padding:11px 13px; border-radius:10px; border:1px solid var(--line);
+    background:var(--panel-2); color:var(--text); font-size:14px;
+  }
+  .field textarea{resize:vertical; min-height:60px;}
+  .field input:focus, .field textarea:focus, .field select:focus{outline:1px solid var(--accent);}
+  .grid-2{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+  .grid-3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;}
+  @media(max-width:680px){ .grid-2, .grid-3{grid-template-columns:1fr;} }
+
+  /* dropzone */
+  .dropzone{
+    border:1.5px dashed var(--line); border-radius:12px; padding:14px; text-align:center;
+    background:var(--panel-2); cursor:pointer; position:relative; overflow:hidden;
+  }
+  .dropzone.drag{border-color:var(--accent); background:var(--accent-dim);}
+  .dropzone img{max-height:90px; border-radius:8px; margin:0 auto 8px; display:block;}
+  .dropzone p{font-size:12px; color:var(--muted);}
+  .dropzone input[type=file]{display:none;}
+
+  /* hours rows */
+  .hours-edit-row{display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--line);}
+  .hours-edit-row:last-child{border-bottom:none;}
+  .hours-edit-row .day{width:70px; font-size:13px; font-weight:700; flex-shrink:0;}
+  .hours-edit-row input[type=time]{
+    background:var(--panel-2); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:7px 8px; font-size:13px;
+  }
+  .toggle{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); margin-right:auto;}
+
+  /* list items (menu / offers) */
+  .item-row{
+    display:flex; gap:10px; align-items:flex-start; padding:14px; border:1px solid var(--line);
+    border-radius:12px; background:var(--panel-2); margin-bottom:10px;
+  }
+  .item-row .thumb{width:52px; height:52px; border-radius:8px; object-fit:cover; flex-shrink:0; background:#222c46;}
+  .item-row .fields{flex:1; display:grid; grid-template-columns:1fr 1fr; gap:8px; min-width:0;}
+  .item-row .fields input, .item-row .fields textarea{
+    padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); font-size:13px; width:100%;
+  }
+  .item-row .fields .full{grid-column:1/-1;}
+  .del-btn{
+    width:30px; height:30px; border-radius:8px; background:rgba(229,115,74,0.15); color:var(--warn);
+    flex-shrink:0; font-size:15px; display:flex; align-items:center; justify-content:center;
+  }
+  .cat-block{border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px;}
+  .cat-head{display:flex; align-items:center; gap:10px; margin-bottom:12px;}
+  .cat-head input{flex:1; padding:9px 12px; border-radius:9px; border:1px solid var(--line); background:var(--panel-2); color:var(--text); font-weight:700; font-size:14px;}
+
+  .add-btn{
+    display:inline-flex; align-items:center; gap:6px; padding:9px 15px; border-radius:10px;
+    background:var(--panel-2); border:1px dashed var(--line); color:var(--accent); font-size:13px; font-weight:700;
+  }
+  .add-cat-btn{
+    display:block; width:100%; padding:13px; border-radius:12px; background:var(--accent-dim); color:var(--accent);
+    font-weight:800; font-size:13.5px; text-align:center;
+  }
+
+  /* colors */
+  .color-row{display:flex; align-items:center; gap:12px; padding:10px 0;}
+  .color-row input[type=color]{width:44px; height:44px; border-radius:10px; border:1px solid var(--line); background:none; padding:0;}
+  .color-row .cinfo b{display:block; font-size:13.5px;}
+  .color-row .cinfo span{font-size:11.5px; color:var(--muted);}
+  .theme-preview{
+    border-radius:12px; padding:16px; margin-top:10px; text-align:center; font-weight:800;
+  }
+
+  /* stats */
+  .stat-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:12px;}
+  .stat-box{background:var(--panel-2); border:1px solid var(--line); border-radius:12px; padding:16px; text-align:center;}
+  .stat-box .num{font-size:26px; font-weight:800; color:var(--accent);}
+  .stat-box .lbl{font-size:11.5px; color:var(--muted); margin-top:4px;}
+  @media(max-width:680px){ .stat-grid{grid-template-columns:1fr;} }
+
+  /* qr */
+  .qr-preview{display:flex; align-items:center; gap:16px; flex-wrap:wrap;}
+  .qr-preview #qrImg{width:130px; height:130px; border-radius:12px; background:#fff; padding:6px; display:flex; align-items:center; justify-content:center; overflow:hidden;}
+  .qr-preview #qrImg img, .qr-preview #qrImg canvas{width:100%; height:100%;}
+
+  /* save bar */
+  .save-bar{
+    position:fixed; bottom:0; right:220px; left:0; z-index:30;
+    background:rgba(13,18,32,0.92); backdrop-filter:blur(10px); border-top:1px solid var(--line);
+    padding:14px 22px; display:flex; justify-content:flex-end; gap:10px;
+  }
+  @media(max-width:900px){ .save-bar{right:0; bottom:64px; z-index:36;} }
+  .save-btn{
+    background:var(--accent); color:#04231d; font-weight:800; padding:12px 26px; border-radius:12px; font-size:14px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .save-status{align-self:center; font-size:12.5px; color:var(--muted);}
+
+  .tab-section{display:none;}
+  .tab-section.active{display:block;}
+
+  /* mobile: sidebar becomes bottom nav */
+  @media(max-width:900px){
+    .shell{flex-direction:column;}
+    .sidebar{
+      width:100%; height:auto; position:fixed; bottom:0; top:auto; z-index:35;
+      flex-direction:row; overflow-x:auto; padding:8px 10px; border-top:1px solid var(--line); border-left:none;
+      gap:2px;
+    }
+    .brand{display:none;}
+    .nav-btn{flex-direction:column; gap:3px; font-size:10.5px; padding:7px 10px; white-space:nowrap;}
+    .main{padding:18px 16px 130px;}
+  }
+</style>
+</head>
+<body>
+
+  <!-- ===== LOGIN GATE (demo only, not real auth) ===== -->
+  <div id="gate">
+    <div class="gate-card">
+      <div class="logo">M</div>
+      <h2>لوحة تحكم MenuGo</h2>
+      <p>دخل الكود السري لتعديل صفحة المحل</p>
+      <input type="password" id="pinInput" inputmode="numeric" maxlength="4" placeholder="••••">
+      <button onclick="checkPin()">دخول</button>
+      <div class="gate-err" id="gateErr">الكود خاطئ، حاول مرة أخرى</div>
+      <div class="gate-hint">الكود التجريبي: 1234 — هادي بوابة بسيطة للعرض فقط، الحساب الحقيقي والتشفير غادي يجيو مع النسخة الكاملة.</div>
+    </div>
+  </div>
+
+  <!-- ===== APP SHELL ===== -->
+  <div id="app">
+    <div class="shell">
+      <nav class="sidebar">
+        <div class="brand">
+          <div class="mark">M</div>
+          <div><b>MenuGo</b><span>لوحة التحكم</span></div>
+        </div>
+        <button class="nav-btn active" data-tab="info" onclick="showTab('info',this)"><span class="ic">🏪</span> المعلومات</button>
+        <button class="nav-btn" data-tab="hours" onclick="showTab('hours',this)"><span class="ic">⏰</span> التوقيت</button>
+        <button class="nav-btn" data-tab="menu" onclick="showTab('menu',this)"><span class="ic">🍽️</span> المنيو</button>
+        <button class="nav-btn" data-tab="offers" onclick="showTab('offers',this)"><span class="ic">🎁</span> العروض</button>
+        <button class="nav-btn" data-tab="design" onclick="showTab('design',this)"><span class="ic">🎨</span> التصميم</button>
+        <button class="nav-btn" data-tab="stats" onclick="showTab('stats',this)"><span class="ic">📊</span> الإحصائيات</button>
+        <button class="nav-btn" data-tab="qr" onclick="showTab('qr',this)"><span class="ic">🔗</span> الرابط و QR</button>
+        <button class="nav-btn" data-tab="ad" onclick="showTab('ad',this)"><span class="ic">📣</span> إشهارك</button>
+      </nav>
+
+      <main class="main">
+        <div class="topbar">
+          <div>
+            <h1 id="topTitle">معلومات المحل</h1>
+            <div class="sub">التغييرات كتنحفظ وكتبان مباشرة فصفحة المحل</div>
+          </div>
+          <a class="preview-link" href="menugo-dar-atlas.html" target="_blank" rel="noopener">👁️ عاين الصفحة</a>
+        </div>
+
+        <!-- ===== TAB: INFO ===== -->
+        <section class="tab-section active" id="tab-info">
+          <div class="card">
+            <h3>هوية المحل</h3>
+            <div class="field">
+              <label>اسم المحل</label>
+              <input type="text" id="f_name" placeholder="مثلاً: محل عبدالرزاق">
+            </div>
+
+            <div class="grid-2">
+              <div class="field">
+                <label>شعار المحل (Logo)</label>
+                <label class="dropzone" for="file_logo" id="dz_logo">
+                  <img id="prev_logo" style="display:none;">
+                  <p id="txt_logo">اضغط باش تختار صورة</p>
+                  <input type="file" id="file_logo" accept="image/*">
+                </label>
+                <input type="url" id="f_logoUrl" placeholder="أو لصق رابط صورة" oninput="onLogoUrlChange(this.value)" style="margin-top:8px;">
+              </div>
+              <div class="field">
+                <label>حرف احتياطي (إلا بلا صورة)</label>
+                <input type="text" id="f_logo" maxlength="2" placeholder="مثلاً: ع">
+              </div>
+            </div>
+
+            <div class="field">
+              <label>صورة الغلاف</label>
+              <label class="dropzone" for="file_cover" id="dz_cover">
+                <img id="prev_cover" style="display:none;">
+                <p id="txt_cover">اضغط باش تختار صورة من التلفون</p>
+                <input type="file" id="file_cover" accept="image/*">
+              </label>
+              <p style="font-size:11px; color:var(--muted); margin:8px 0 4px;">إلا ماخدمش الرفع، لصق رابط صورة هنا:</p>
+              <input type="url" id="f_coverUrl" placeholder="https://...jpg" oninput="onCoverUrlChange(this.value)">
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>التواصل</h3>
+            <div class="grid-2">
+              <div class="field">
+                <label>رقم الهاتف</label>
+                <input type="tel" id="f_phone" placeholder="+212600000000">
+              </div>
+              <div class="field">
+                <label>رقم واتساب</label>
+                <input type="tel" id="f_whatsapp" placeholder="+212600000000">
+              </div>
+            </div>
+            <div class="field">
+              <label>العنوان</label>
+              <input type="text" id="f_address" placeholder="مثلاً: المدينة القديمة، مراكش">
+            </div>
+            <div class="grid-3">
+              <div class="field"><label>Instagram</label><input type="text" id="f_ig" placeholder="@username"></div>
+              <div class="field"><label>Facebook</label><input type="text" id="f_fb" placeholder="اسم الصفحة"></div>
+              <div class="field"><label>TikTok</label><input type="text" id="f_tk" placeholder="@username"></div>
+            </div>
+          </div>
+          <div class="card">
+            <h3>الفيديو الترويجي</h3>
+            <div class="field">
+              <label>ارفع فيديو من التلفون (أقل من 20 ثانية يفضل)</label>
+              <label class="dropzone" for="file_video" id="dz_video">
+                <p id="txt_video">اضغط باش تختار فيديو من التلفون</p>
+                <input type="file" id="file_video" accept="video/*">
+              </label>
+            </div>
+            <div class="field">
+              <label>أو حط رابط (يوتيوب أو رابط فيديو مباشر mp4)</label>
+              <input type="url" id="f_video" placeholder="https://youtube.com/watch?v=... أو https://...mp4" oninput="onVideoChange(this.value)">
+            </div>
+            <div id="videoPreviewWrap" style="display:none; border-radius:12px; overflow:hidden; margin-top:8px;"></div>
+            <p style="font-size:11px; color:var(--muted); margin-top:8px;">الفيديوهات الكبار قديهم ما يتسجلوش زوين، إلا طلع خطأ استعمل رابط يوتيوب بدل الرفع المباشر.</p>
+          </div>
+        </section>
+
+        <!-- ===== TAB: HOURS ===== -->
+        <section class="tab-section" id="tab-hours">
+          <div class="card">
+            <h3>ساعات العمل</h3>
+            <div id="hoursList"></div>
+          </div>
+        </section>
+
+        <!-- ===== TAB: MENU ===== -->
+        <section class="tab-section" id="tab-menu">
+          <div class="card">
+            <h3>فئات ومنتجات المنيو</h3>
+            <div id="menuCats"></div>
+            <button class="add-cat-btn" onclick="addCategory()">+ إضافة فئة جديدة</button>
+          </div>
+        </section>
+
+        <!-- ===== TAB: OFFERS ===== -->
+        <section class="tab-section" id="tab-offers">
+          <div class="card">
+            <h3>عروض اليوم</h3>
+            <div id="offersList"></div>
+            <button class="add-btn" onclick="addOffer()">+ إضافة عرض</button>
+          </div>
+        </section>
+
+        <!-- ===== TAB: DESIGN ===== -->
+        <section class="tab-section" id="tab-design">
+          <div class="card">
+            <h3>ألوان الصفحة</h3>
+            <div class="color-row">
+              <input type="color" id="f_primary" onchange="updateThemePreview()">
+              <div class="cinfo"><b>اللون الأساسي</b><span>يستعمل فالعناوين والأزرار الرئيسية</span></div>
+            </div>
+            <div class="color-row">
+              <input type="color" id="f_accent" onchange="updateThemePreview()">
+              <div class="cinfo"><b>لون التمييز</b><span>يستعمل فالأسعار والتفاصيل الذهبية</span></div>
+            </div>
+            <div class="theme-preview" id="themePrev">محل عبدالرزاق</div>
+          </div>
+          <div class="card">
+            <h3>الوضع الليلي</h3>
+            <div class="field" style="margin-bottom:0;">
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="f_dark" style="width:16px; height:16px;"> فعّل الوضع الليلي بشكل تلقائي للزوار
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== TAB: STATS ===== -->
+        <section class="tab-section" id="tab-stats">
+          <div class="card">
+            <h3>إحصائيات الزيارات</h3>
+            <div class="stat-grid">
+              <div class="stat-box"><div class="num" id="statVisits">—</div><div class="lbl">إجمالي الزيارات</div></div>
+              <div class="stat-box"><div class="num" id="statItems">—</div><div class="lbl">عدد المنتجات</div></div>
+              <div class="stat-box"><div class="num" id="statCats">—</div><div class="lbl">عدد الفئات</div></div>
+            </div>
+            <p style="color:var(--muted); font-size:12px; margin-top:14px;">
+              عداد الزيارات كيتزاد أوتوماتيكياً كل ما حد فتح صفحة المحل. إحصائيات أكثر تفصيلاً (المصدر، الوقت، الجهاز) غادي تجي مع لوحة التحكم الكاملة.
+            </p>
+          </div>
+        </section>
+
+        <!-- ===== TAB: QR / LINK ===== -->
+        <section class="tab-section" id="tab-qr">
+          <div class="card">
+            <h3>رابط الصفحة و QR Code</h3>
+            <div class="field">
+              <label>الرابط العمومي ديال المحل</label>
+              <input type="text" id="f_publicUrl" placeholder="https://menugo.ma/dar-atlas" oninput="updateQr()">
+            </div>
+            <div class="qr-preview">
+              <div id="qrImg"></div>
+              <div>
+                <p style="font-size:13px; color:var(--muted); margin-bottom:10px;">هاد الكود كيتحدث أوتوماتيكياً حسب الرابط. حطوه فوق الطاولة أو فالمنشورات ديالكم.</p>
+                <a class="add-btn" id="dlQr" download="menugo-qr.png" href="#">⬇ تحميل QR</a>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== TAB: AD (إشهارك) ===== -->
+        <section class="tab-section" id="tab-ad">
+          <div class="card">
+            <h3>إشهار خدمتك على صفحة المحل</h3>
+            <p style="font-size:12.5px; color:var(--muted); margin-bottom:16px;">هاد المعلومات غادي تبان فبانر صغير فأسفل صفحة المحل، باش أصحاب المحلات الآخرين يعرفو كيفاش يتواصلو معاك للحصول على خدمة ديجيتال بحال هادي.</p>
+            <div class="field">
+              <label>اسمك أو اسم الخدمة</label>
+              <input type="text" id="f_adName" placeholder="مثلاً: عبدالرزاق — خدمات ديجيتال" oninput="updateAdPreview()">
+            </div>
+            <div class="grid-2">
+              <div class="field">
+                <label>رقم الهاتف (اختياري)</label>
+                <input type="tel" id="f_adPhone" placeholder="سيبها خاوية دابا، زيدها من بعد" oninput="updateAdPreview()">
+              </div>
+              <div class="field">
+                <label>البريد الإلكتروني (اختياري)</label>
+                <input type="text" id="f_adEmail" placeholder="سيبها خاوية دابا، زيدها من بعد" oninput="updateAdPreview()">
+              </div>
+            </div>
+            <div class="field">
+              <label>معاينة البانر</label>
+              <div id="adPreview" style="background:#0d1220; border-radius:12px; padding:14px; font-size:12.5px; color:#eef1f8; text-align:center;"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="save-bar">
+      <span class="save-status" id="saveStatus"></span>
+      <button class="save-btn" style="background:var(--panel-2); color:var(--text); border:1px solid var(--line);" onclick="exportData()">📤 تصدير البيانات</button>
+      <button class="save-btn" onclick="saveAll()">💾 حفظ التغييرات</button>
+    </div>
+
+    <textarea id="exportBox" readonly style="display:none; width:100%; min-height:160px; margin-top:10px; padding:10px; font-size:11px; direction:ltr; background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:8px;"></textarea>
+  </div>
+
+<script>
+  const SHOP_KEY = 'shop:dar-atlas';
+  const VISITS_KEY = 'shop:dar-atlas:visits';
+  let shop = defaultShop();
+
+  function defaultShop(){
+    return {
+      name:'محل عبدالرزاق', logo:'ع', logoImg:'', cover:'', video:'',
+      phone:'+21277005219', whatsapp:'+21277005219', address:'حي الحرشة، وادي زم',
+      social:{ig:'@cafeshob',fb:'Cafe Shob',tk:'@shobcafe'},
+      hours:[
+        {day:'الأحد',open:'06:00',close:'00:00',closed:false},
+        {day:'الإثنين',open:'06:00',close:'00:00',closed:false},
+        {day:'الثلاثاء',open:'06:00',close:'00:00',closed:false},
+        {day:'الأربعاء',open:'06:00',close:'00:00',closed:false},
+        {day:'الخميس',open:'06:00',close:'00:00',closed:false},
+        {day:'الجمعة',open:'06:00',close:'00:00',closed:false},
+        {day:'السبت',open:'06:00',close:'00:00',closed:false},
+      ],
+      categories:[
+        {id:'c1', name:'مشروبات ساخنة', items:[
+          {id:'i1', name:'قهوة', desc:'', price:'10', img:''},
+          {id:'i2', name:'أتاي', desc:'', price:'9', img:''},
+        ]},
+        {id:'c2', name:'عصائر', items:[
+          {id:'i3', name:'عصير', desc:'', price:'15', img:''},
+        ]},
+      ],
+      offers:[],
+      colors:{primary:'#1b2a6b', accent:'#c89b3c'},
+      dark:false,
+      publicUrl:'https://menugo.ma/dar-atlas',
+      adName:'', adPhone:'', adEmail:''
+    };
+  }
+
+  function uid(){ return 'x' + Math.random().toString(36).slice(2,9); }
+
+  // ===== PIN GATE =====
+  function checkPin(){
+    const val = document.getElementById('pinInput').value;
+    if(val === '1234'){
+      document.getElementById('gate').style.display='none';
+      document.getElementById('app').classList.add('show');
+      init();
+    } else {
+      document.getElementById('gateErr').style.display='block';
+    }
+  }
+  document.getElementById('pinInput').addEventListener('keydown', e=>{ if(e.key==='Enter') checkPin(); });
+
+  // ===== INIT =====
+  async function init(){
+    try{
+      const raw = localStorage.getItem(SHOP_KEY);
+      if(raw) shop = JSON.parse(raw);
+    }catch(e){ /* لا توجد بيانات محفوظة بعد، كنستعملو القيم الافتراضية */ }
+    renderAll();
+    loadStats();
+  }
+
+  function renderAll(){
+    document.getElementById('f_name').value = shop.name;
+    document.getElementById('f_logo').value = shop.logo;
+    document.getElementById('f_phone').value = shop.phone;
+    document.getElementById('f_whatsapp').value = shop.whatsapp;
+    document.getElementById('f_address').value = shop.address;
+    document.getElementById('f_ig').value = shop.social.ig;
+    document.getElementById('f_fb').value = shop.social.fb;
+    document.getElementById('f_tk').value = shop.social.tk;
+    document.getElementById('f_primary').value = shop.colors.primary;
+    document.getElementById('f_accent').value = shop.colors.accent;
+    document.getElementById('f_dark').checked = shop.dark;
+    document.getElementById('f_publicUrl').value = shop.publicUrl;
+    document.getElementById('f_adName').value = shop.adName || '';
+    document.getElementById('f_adPhone').value = shop.adPhone || '';
+    document.getElementById('f_adEmail').value = shop.adEmail || '';
+    updateAdPreview();
+    if(shop.logoImg){ document.getElementById('prev_logo').src = shop.logoImg; document.getElementById('prev_logo').style.display='block'; document.getElementById('txt_logo').textContent='اضغط باش تبدل الصورة'; if(shop.logoImg.startsWith('http')) document.getElementById('f_logoUrl').value = shop.logoImg; }
+    if(shop.cover){ document.getElementById('prev_cover').src = shop.cover; document.getElementById('prev_cover').style.display='block'; document.getElementById('txt_cover').textContent='اضغط لتغيير الصورة'; if(shop.cover.startsWith('http')) document.getElementById('f_coverUrl').value = shop.cover; }
+    document.getElementById('f_video').value = shop.video || '';
+    if(shop.video) onVideoChange(shop.video);
+    renderHours();
+    renderMenu();
+    renderOffers();
+    updateThemePreview();
+    updateQr();
+  }
+
+  // ===== TABS =====
+  function showTab(id, btn){
+    document.querySelectorAll('.tab-section').forEach(s=>s.classList.remove('active'));
+    document.getElementById('tab-'+id).classList.add('active');
+    document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    const titles = {info:'معلومات المحل',hours:'ساعات العمل',menu:'المنيو',offers:'عروض اليوم',design:'التصميم والألوان',stats:'الإحصائيات',qr:'الرابط و QR Code',ad:'إشهار خدمتك'};
+    document.getElementById('topTitle').textContent = titles[id];
+  }
+
+  // ===== IMAGE DROPZONE (resize + base64) =====
+  function setupDropzone(zoneId, fileId, onLoaded){
+    const zone = document.getElementById(zoneId);
+    const input = document.getElementById(fileId);
+    zone.addEventListener('dragover', e=>{ e.preventDefault(); zone.classList.add('drag'); });
+    zone.addEventListener('dragleave', ()=> zone.classList.remove('drag'));
+    zone.addEventListener('drop', e=>{
+      e.preventDefault(); zone.classList.remove('drag');
+      if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0], onLoaded);
+    });
+    input.addEventListener('change', e=>{ if(e.target.files[0]) handleFile(e.target.files[0], onLoaded); });
+  }
+  function handleFile(file, onLoaded){
+    if(!file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = ev=>{
+      const img = new Image();
+      img.onload = ()=>{
+        const maxW = 800;
+        const scale = Math.min(1, maxW/img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width*scale; canvas.height = img.height*scale;
+        canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+        onLoaded(dataUrl);
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+  function handleFile(file, onLoaded, maxW){
+    if(!file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = ev=>{
+      const img = new Image();
+      img.onload = ()=>{
+        const w = maxW || 800;
+        const scale = Math.min(1, w/img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width*scale; canvas.height = img.height*scale;
+        canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+        onLoaded(dataUrl);
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+  setupDropzone('dz_logo','file_logo', (url)=>{
+    shop.logoImg = url;
+    document.getElementById('prev_logo').src = url;
+    document.getElementById('prev_logo').style.display='block';
+    document.getElementById('txt_logo').textContent = 'اضغط باش تبدل الصورة';
+  });
+  // الفيديو: رفع مباشر من التلفون (بلا ضغط، كنراقبو الحجم فقط)
+  document.getElementById('file_video').addEventListener('change', e=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    if(!file.type.startsWith('video/')) return;
+    const maxBytes = 3.5 * 1024 * 1024; // هامش أمان تحت حد 5MB ديال التخزين
+    if(file.size > maxBytes){
+      document.getElementById('txt_video').textContent = 'الفيديو كبير بزاف (' + Math.round(file.size/1024/1024) + 'MB) — استعمل رابط يوتيوب بدل';
+      document.getElementById('txt_video').style.color = 'var(--warn)';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = ev=>{
+      shop.video = ev.target.result;
+      document.getElementById('f_video').value = '';
+      document.getElementById('txt_video').textContent = 'تم اختيار الفيديو ✓';
+      document.getElementById('txt_video').style.color = 'var(--accent)';
+      onVideoChange(shop.video);
+    };
+    reader.readAsDataURL(file);
+  });
+  setupDropzone('dz_cover','file_cover', (url)=>{
+    shop.cover = url;
+    document.getElementById('f_coverUrl').value = '';
+    document.getElementById('prev_cover').src = url;
+    document.getElementById('prev_cover').style.display='block';
+    document.getElementById('txt_cover').textContent = 'اضغط لتغيير الصورة';
+  });
+
+  function onCoverUrlChange(url){
+    if(!url) return;
+    shop.cover = url;
+    document.getElementById('prev_cover').src = url;
+    document.getElementById('prev_cover').style.display='block';
+    document.getElementById('txt_cover').textContent = 'اضغط لتغيير الصورة';
+  }
+
+  function onLogoUrlChange(url){
+    if(!url) return;
+    shop.logoImg = url;
+    document.getElementById('prev_logo').src = url;
+    document.getElementById('prev_logo').style.display='block';
+    document.getElementById('txt_logo').textContent = 'اضغط باش تبدل الصورة';
+  }
+
+  // ===== الفيديو الترويجي =====
+  function toEmbedUrl(url){
+    if(!url) return null;
+    const yt = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([\w-]{6,})/);
+    if(yt) return 'https://www.youtube.com/embed/' + yt[1];
+    return null;
+  }
+  function onVideoChange(url){
+    shop.video = url;
+    const wrap = document.getElementById('videoPreviewWrap');
+    if(!url){ wrap.style.display='none'; wrap.innerHTML=''; return; }
+    const embed = toEmbedUrl(url);
+    wrap.style.display = 'block';
+    if(embed){
+      wrap.innerHTML = `<iframe src="${embed}" style="width:100%; aspect-ratio:16/9; border:0;" allowfullscreen></iframe>`;
+    } else if(url.startsWith('data:video/') || /\.(mp4|webm|ogg)(\?.*)?$/i.test(url)){
+      wrap.innerHTML = `<video src="${url}" controls style="width:100%; display:block;"></video>`;
+    } else {
+      wrap.innerHTML = `<p style="font-size:12px; color:var(--warn); padding:8px;">الرابط ماشي رابط يوتيوب ولا ملف فيديو مباشر (mp4/webm) — تأكد منو.</p>`;
+    }
+  }
+
+  // ===== HOURS =====
+  function renderHours(){
+    const list = document.getElementById('hoursList');
+    list.innerHTML = '';
+    shop.hours.forEach((h, idx)=>{
+      const row = document.createElement('div');
+      row.className = 'hours-edit-row';
+      row.innerHTML = `
+        <div class="day">${h.day}</div>
+        <input type="time" value="${h.open}" onchange="shop.hours[${idx}].open=this.value">
+        <span style="color:var(--muted)">إلى</span>
+        <input type="time" value="${h.close}" onchange="shop.hours[${idx}].close=this.value">
+        <label class="toggle"><input type="checkbox" ${h.closed?'checked':''} onchange="shop.hours[${idx}].closed=this.checked"> مغلق</label>
+      `;
+      list.appendChild(row);
+    });
+  }
+
+  // ===== MENU =====
+  function renderMenu(){
+    const wrap = document.getElementById('menuCats');
+    wrap.innerHTML = '';
+    shop.categories.forEach((cat, ci)=>{
+      const block = document.createElement('div');
+      block.className = 'cat-block';
+      block.innerHTML = `
+        <div class="cat-head">
+          <input type="text" value="${escapeHtml(cat.name)}" onchange="shop.categories[${ci}].name=this.value">
+          <button class="del-btn" onclick="removeCategory(${ci})">✕</button>
+        </div>
+        <div id="items-${ci}"></div>
+        <button class="add-btn" onclick="addItem(${ci})">+ إضافة منتج</button>
+      `;
+      wrap.appendChild(block);
+      const itemsWrap = block.querySelector('#items-'+ci);
+      cat.items.forEach((it, ii)=>{
+        itemsWrap.appendChild(buildItemRow(it, (val)=>{ shop.categories[ci].items[ii] = val; }, ()=>{ shop.categories[ci].items.splice(ii,1); renderMenu(); }));
+      });
+    });
+  }
+  function buildItemRow(it, onChange, onDelete){
+    const row = document.createElement('div');
+    row.className = 'item-row';
+    const thumb = document.createElement('img');
+    thumb.className = 'thumb';
+    if(it.img) thumb.src = it.img;
+    thumb.style.cursor = 'pointer';
+    thumb.title = 'اضغط لرفع صورة';
+    const fileInput = document.createElement('input');
+    fileInput.type='file'; fileInput.accept='image/*'; fileInput.style.display='none';
+    fileInput.addEventListener('change', e=>{ if(e.target.files[0]) handleFile(e.target.files[0], url=>{ it.img=url; thumb.src=url; onChange(it); }); });
+    thumb.addEventListener('click', ()=> fileInput.click());
+
+    const fields = document.createElement('div');
+    fields.className = 'fields';
+    fields.innerHTML = `
+      <input type="text" placeholder="اسم المنتج" value="${escapeHtml(it.name)}" data-k="name">
+      <input type="text" placeholder="الثمن (د.م)" value="${escapeHtml(it.price)}" data-k="price">
+      <textarea placeholder="وصف قصير" data-k="desc" class="full">${escapeHtml(it.desc||'')}</textarea>
+    `;
+    fields.querySelectorAll('[data-k]').forEach(inp=>{
+      inp.addEventListener('input', ()=>{ it[inp.dataset.k] = inp.value; onChange(it); });
+    });
+    const del = document.createElement('button');
+    del.className='del-btn'; del.textContent='✕';
+    del.addEventListener('click', onDelete);
+
+    row.appendChild(thumb); row.appendChild(fields); row.appendChild(del); row.appendChild(fileInput);
+    return row;
+  }
+  function addCategory(){
+    shop.categories.push({id:uid(), name:'فئة جديدة', items:[]});
+    renderMenu();
+  }
+  function removeCategory(ci){
+    shop.categories.splice(ci,1);
+    renderMenu();
+  }
+  function addItem(ci){
+    shop.categories[ci].items.push({id:uid(), name:'منتج جديد', desc:'', price:'0', img:''});
+    renderMenu();
+  }
+
+  // ===== OFFERS =====
+  function renderOffers(){
+    const wrap = document.getElementById('offersList');
+    wrap.innerHTML = '';
+    shop.offers.forEach((o, oi)=>{
+      const row = document.createElement('div');
+      row.className = 'item-row';
+      const thumb = document.createElement('img');
+      thumb.className = 'thumb'; if(o.img) thumb.src=o.img; thumb.style.cursor='pointer'; thumb.title='اضغط لرفع صورة';
+      const fileInput = document.createElement('input');
+      fileInput.type='file'; fileInput.accept='image/*'; fileInput.style.display='none';
+      fileInput.addEventListener('change', e=>{ if(e.target.files[0]) handleFile(e.target.files[0], url=>{ o.img=url; thumb.src=url; }); });
+      thumb.addEventListener('click', ()=>fileInput.click());
+      const fields = document.createElement('div');
+      fields.className = 'fields';
+      fields.innerHTML = `
+        <input type="text" placeholder="اسم المنتج" value="${escapeHtml(o.name)}" data-k="name" class="full">
+        <input type="text" placeholder="الثمن قبل" value="${escapeHtml(o.oldPrice)}" data-k="oldPrice">
+        <input type="text" placeholder="الثمن بعد" value="${escapeHtml(o.newPrice)}" data-k="newPrice">
+      `;
+      fields.querySelectorAll('[data-k]').forEach(inp=> inp.addEventListener('input', ()=>{ o[inp.dataset.k]=inp.value; }));
+      const del = document.createElement('button'); del.className='del-btn'; del.textContent='✕';
+      del.addEventListener('click', ()=>{ shop.offers.splice(oi,1); renderOffers(); });
+      row.appendChild(thumb); row.appendChild(fields); row.appendChild(del); row.appendChild(fileInput);
+      wrap.appendChild(row);
+    });
+  }
+  function addOffer(){
+    shop.offers.push({id:uid(), name:'عرض جديد', oldPrice:'0', newPrice:'0', img:''});
+    renderOffers();
+  }
+
+  // ===== DESIGN =====
+  function updateThemePreview(){
+    const p = document.getElementById('f_primary').value;
+    const a = document.getElementById('f_accent').value;
+    const prev = document.getElementById('themePrev');
+    prev.style.background = p; prev.style.color = a;
+    prev.textContent = (document.getElementById('f_name').value || 'اسم المحل');
+  }
+
+  // ===== STATS =====
+  async function loadStats(){
+    let visits = 0;
+    try{
+      const raw = localStorage.getItem(VISITS_KEY);
+      if(raw) visits = parseInt(raw) || 0;
+    }catch(e){ visits = 0; }
+    document.getElementById('statVisits').textContent = visits;
+    const itemCount = shop.categories.reduce((s,c)=> s + c.items.length, 0);
+    document.getElementById('statItems').textContent = itemCount;
+    document.getElementById('statCats').textContent = shop.categories.length;
+  }
+
+  // ===== QR =====
+  // ===== إشهار خدمتك =====
+  function updateAdPreview(){
+    const name = document.getElementById('f_adName').value.trim();
+    const phone = document.getElementById('f_adPhone').value.trim();
+    const email = document.getElementById('f_adEmail').value.trim();
+    const prev = document.getElementById('adPreview');
+    if(!name && !phone && !email){
+      prev.innerHTML = '<span style="color:#8b93ab;">عمر خانة واحدة على الأقل باش يبان البانر</span>';
+      return;
+    }
+    let html = '🚀 هاد الصفحة تصاوبت من طرف ' + (name || 'صاحب الخدمة');
+    html += '<br>خدمات ديجيتال ومنيوهات للمحلات — تواصلو معايا';
+    if(phone) html += ' 📞 ' + phone;
+    if(email) html += ' ✉️ ' + email;
+    prev.innerHTML = html;
+  }
+
+  function updateQr(){
+    const url = document.getElementById('f_publicUrl').value || 'https://menugo.ma/dar-atlas';
+    const box = document.getElementById('qrImg');
+    box.innerHTML = '';
+    try{
+      renderQRCodeLocal(box, url, 260);
+      setTimeout(()=>{
+        const img = box.querySelector('img') || box.querySelector('canvas');
+        if(img){
+          const dataUrl = img.tagName === 'CANVAS' ? img.toDataURL('image/png') : img.src;
+          document.getElementById('dlQr').href = dataUrl;
+        }
+      }, 60);
+    }catch(e){
+      box.innerHTML = '<p style="font-size:11px; color:var(--warn); padding:8px;">تعذر إنشاء QR، حاول تحديث الصفحة</p>';
+    }
+  }
+
+  // ===== EXPORT (باش نصيفطو البيانات للمطور ونثبتوها فالنسخة النهائية) =====
+  function exportData(){
+    const box = document.getElementById('exportBox');
+    box.style.display = 'block';
+    box.value = JSON.stringify(shop, null, 2);
+    box.focus();
+    box.select();
+    try{
+      document.execCommand('copy');
+      alert('تصدرات البيانات ونسخات، دابا الصقها وصيفطها للمطور');
+    }catch(e){
+      alert('حددت البيانات تحت، انسخها يدوياً وصيفطها للمطور');
+    }
+  }
+
+  // ===== SAVE =====
+  async function saveAll(){
+    shop.adName = document.getElementById('f_adName').value;
+    shop.adPhone = document.getElementById('f_adPhone').value;
+    shop.adEmail = document.getElementById('f_adEmail').value;
+    shop.name = document.getElementById('f_name').value;
+    shop.logo = document.getElementById('f_logo').value || shop.name.charAt(0);
+    shop.phone = document.getElementById('f_phone').value;
+    shop.whatsapp = document.getElementById('f_whatsapp').value;
+    shop.address = document.getElementById('f_address').value;
+    shop.social.ig = document.getElementById('f_ig').value;
+    shop.social.fb = document.getElementById('f_fb').value;
+    shop.social.tk = document.getElementById('f_tk').value;
+    shop.colors.primary = document.getElementById('f_primary').value;
+    shop.colors.accent = document.getElementById('f_accent').value;
+    shop.dark = document.getElementById('f_dark').checked;
+    shop.publicUrl = document.getElementById('f_publicUrl').value;
+
+    const statusEl = document.getElementById('saveStatus');
+    statusEl.textContent = 'كنحفظو...';
+    try{
+      localStorage.setItem(SHOP_KEY, JSON.stringify(shop));
+      statusEl.textContent = '✓ تم الحفظ بنجاح — التغييرات بانو فصفحة المحل';
+    }catch(e){
+      if(e && e.name === 'QuotaExceededError'){
+        statusEl.textContent = '✕ التصاور كبار بزاف، صغرهم شوية وعاود جرب';
+      } else {
+        statusEl.textContent = '✕ خطأ فالحفظ، حاول مرة أخرى';
+      }
+    }
+    loadStats();
+    setTimeout(()=>{ statusEl.textContent=''; }, 4000);
+  }
+
+  function escapeHtml(s){
+    return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+</script>
+</body>
+</html>
