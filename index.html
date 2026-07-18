@@ -808,38 +808,16 @@
 
   (async function syncWithAdmin(){
     let loadedShop = null;
-    let debugMsg = 'SHOP_ID = "' + SHOP_ID + '" | ';
     try{
-      const docSnap = await db.collection('shops').doc(SHOP_ID).get({ source: 'server' });
-      debugMsg += 'exists = ' + docSnap.exists;
-      if(docSnap.exists){
-        loadedShop = docSnap.data();
-        debugMsg += ' | name = "' + (loadedShop.name || '(فارغ)') + '"';
-        applyShopData(loadedShop);
-      }
-    }catch(e){
-      debugMsg += 'خطأ: ' + (e && e.message ? e.message : e);
-    }
-    bumpVisits(); // كنسجلو الزيارة بعد قراءة البيانات، باش ما تتعارضش الكتابة مع القراءة
-    const dbg = document.createElement('div');
-    dbg.style.cssText = 'position:fixed; bottom:0; left:0; right:0; z-index:9999; background:#000; color:#0f0; font-size:10px; padding:8px; direction:ltr; text-align:left; word-break:break-all; max-height:40vh; overflow-y:auto;';
-    dbg.textContent = debugMsg;
-    document.body.appendChild(dbg);
-
-    // ===== فحص إضافي: سرد جميع الوثائق ومقارنة الـ ID حرف بحرف =====
-    try{
+      // كنقراو اللائحة الكاملة ديال المحلات ونبحثو فيها على المحل الصحيح
+      // (هادشي أضمن من القراءة المباشرة لوثيقة وحيدة اللي عندها مشكل كاش أحياناً)
       const allSnap = await db.collection('shops').get({ source: 'server' });
-      let listMsg = '\n\n--- جميع الوثائق (' + allSnap.size + ') ---\n';
       allSnap.forEach(d=>{
-        const match = (d.id === SHOP_ID) ? ' ✅ تطابق' : '';
-        listMsg += 'id="' + d.id + '" (len=' + d.id.length + ') name="' + (d.data().name || '') + '"' + match + '\n';
+        if(d.id === SHOP_ID){ loadedShop = d.data(); }
       });
-      listMsg += '\nSHOP_ID المستعمل: "' + SHOP_ID + '" (len=' + SHOP_ID.length + ')';
-      dbg.textContent += listMsg;
-    }catch(e2){
-      dbg.textContent += '\n\nخطأ فسرد الوثائق: ' + (e2 && e2.message ? e2.message : e2);
-    }
-    // ===== نهاية الفحص الإضافي =====
+      if(loadedShop){ applyShopData(loadedShop); }
+    }catch(e){ /* تعذر الاتصال بقاعدة البيانات، كنبقاو على المحتوى الافتراضي */ }
+    bumpVisits();
     decorateMenuItems();
     wireSocialLinks(loadedShop);
     setupReveal();
