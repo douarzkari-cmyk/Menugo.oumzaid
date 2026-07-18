@@ -811,7 +811,7 @@
     let loadedShop = null;
     let debugMsg = 'SHOP_ID = "' + SHOP_ID + '" | ';
     try{
-      const docSnap = await db.collection('shops').doc(SHOP_ID).get();
+      const docSnap = await db.collection('shops').doc(SHOP_ID).get({ source: 'server' });
       debugMsg += 'exists = ' + docSnap.exists;
       if(docSnap.exists){
         loadedShop = docSnap.data();

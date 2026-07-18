@@ -1791,7 +1791,7 @@ window.renderQRCodeLocal = renderQRCodeLocal;
     const val = document.getElementById('pinInput').value;
     let expectedPin = '1234';
     try{
-      const docSnap = await db.collection('shops').doc(SHOP_ID).get();
+      const docSnap = await db.collection('shops').doc(SHOP_ID).get({ source: 'server' });
       if(docSnap.exists && docSnap.data().pin) expectedPin = docSnap.data().pin;
     }catch(e){ console.error('تعذر التحقق من الكود، استعملنا الكود الافتراضي:', e); }
     btn.textContent = originalText;
@@ -1809,7 +1809,7 @@ window.renderQRCodeLocal = renderQRCodeLocal;
   // ===== INIT =====
   async function init(){
     try{
-      const docSnap = await db.collection('shops').doc(SHOP_ID).get();
+      const docSnap = await db.collection('shops').doc(SHOP_ID).get({ source: 'server' });
       if(docSnap.exists){
         const data = docSnap.data();
         shop = Object.assign(defaultShop(), data);
@@ -2213,7 +2213,7 @@ window.renderQRCodeLocal = renderQRCodeLocal;
       statusEl.textContent = '✓ تم الحفظ بنجاح — التغييرات بانو فصفحة المحل';
 
       // ===== تشخيص مؤقت: تأكيد شنو تسجل فعلا فـ Firestore =====
-      const verifySnap = await db.collection('shops').doc(SHOP_ID).get();
+      const verifySnap = await db.collection('shops').doc(SHOP_ID).get({ source: 'server' });
       const verifyName = verifySnap.exists ? (verifySnap.data().name || '(فارغ)') : '(المستند ماكاينش)';
       let dbg = document.getElementById('adminDebugBanner');
       if(!dbg){
