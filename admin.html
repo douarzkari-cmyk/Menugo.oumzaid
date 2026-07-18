@@ -1817,6 +1817,17 @@ window.renderQRCodeLocal = renderQRCodeLocal;
     }catch(e){ console.error('تعذر تحميل البيانات من Firestore:', e); }
     renderAll();
     loadStats();
+
+    // ===== تشخيص مؤقت =====
+    let dbg = document.getElementById('adminDebugBanner');
+    if(!dbg){
+      dbg = document.createElement('div');
+      dbg.id = 'adminDebugBanner';
+      dbg.style.cssText = 'position:fixed; bottom:0; left:0; right:0; z-index:9999; background:#000; color:#0f0; font-size:11px; padding:8px; direction:ltr; text-align:left; word-break:break-all;';
+      document.body.appendChild(dbg);
+    }
+    dbg.textContent = 'LOAD → SHOP_ID = "' + SHOP_ID + '" | url = "' + location.href + '" | shop.name = "' + (shop.name || '(فارغ)') + '"';
+    // ===== نهاية كود التشخيص =====
   }
 
   function renderAll(){
@@ -2200,6 +2211,20 @@ window.renderQRCodeLocal = renderQRCodeLocal;
       // merge:true باش ما نمسحوش عداد الزيارات (visits) اللي كتزايد من صفحة المحل
       await db.collection('shops').doc(SHOP_ID).set(shop, { merge: true });
       statusEl.textContent = '✓ تم الحفظ بنجاح — التغييرات بانو فصفحة المحل';
+
+      // ===== تشخيص مؤقت: تأكيد شنو تسجل فعلا فـ Firestore =====
+      const verifySnap = await db.collection('shops').doc(SHOP_ID).get();
+      const verifyName = verifySnap.exists ? (verifySnap.data().name || '(فارغ)') : '(المستند ماكاينش)';
+      let dbg = document.getElementById('adminDebugBanner');
+      if(!dbg){
+        dbg = document.createElement('div');
+        dbg.id = 'adminDebugBanner';
+        dbg.style.cssText = 'position:fixed; bottom:0; left:0; right:0; z-index:9999; background:#000; color:#0f0; font-size:11px; padding:8px; direction:ltr; text-align:left; word-break:break-all;';
+        document.body.appendChild(dbg);
+      }
+      dbg.textContent = 'SAVE → SHOP_ID = "' + SHOP_ID + '" | url = "' + location.href + '" | تحقق بعد الحفظ: name = "' + verifyName + '"';
+      // ===== نهاية كود التشخيص =====
+
     }catch(e){
       console.error(e);
       statusEl.textContent = '✕ خطأ فالحفظ، تأكد من الاتصال بالأنترنت وحاول مرة أخرى';
