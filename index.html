@@ -333,6 +333,53 @@
   @media (min-width:760px){
     .cover{height:52vh;}
   }
+
+  /* ===== إضافات احترافية: وضع ليلي + أنيميشنات ===== */
+  .theme-toggle{
+    position:fixed; top:16px; left:16px; z-index:50;
+    width:42px; height:42px; border-radius:50%;
+    background:rgba(255,255,255,0.92); backdrop-filter:blur(6px);
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:var(--shadow); font-size:18px;
+    transition:transform .2s ease, background .3s ease;
+  }
+  .theme-toggle:active{transform:scale(0.88);}
+
+  body.dark-mode{
+    --ivory:#171320;
+    --ivory-2:#221c2e;
+    --ink:#f2ead9;
+    --line: rgba(255,255,255,0.12);
+  }
+  body.dark-mode .qa-btn,
+  body.dark-mode .search-wrap input,
+  body.dark-mode .tab,
+  body.dark-mode .hours-table,
+  body.dark-mode .social-pill{
+    background:var(--ivory-2); color:var(--ink); border-color:var(--line);
+  }
+  body.dark-mode .qa-btn.whatsapp{background:#2f6e51; color:#fff;}
+  body.dark-mode .sticky-bar{background:rgba(23,19,32,0.92);}
+  body.dark-mode .identity{background:var(--ivory);}
+  body.dark-mode .theme-toggle{background:rgba(34,28,46,0.92); color:#e4c876;}
+  body.dark-mode .cart-drawer{background:var(--ivory);}
+  body.dark-mode .offer-body .old{opacity:.5;}
+
+  @keyframes waPulse{
+    0%{ box-shadow:0 0 0 0 rgba(47,110,81,0.55); }
+    70%{ box-shadow:0 0 0 12px rgba(47,110,81,0); }
+    100%{ box-shadow:0 0 0 0 rgba(47,110,81,0); }
+  }
+  .qa-btn.whatsapp{ animation:waPulse 2.6s ease-out infinite; }
+  .sticky-bar .primary{ animation:waPulse 2.6s ease-out infinite; }
+
+  @keyframes cartBump{
+    0%{ transform:scale(1); }
+    35%{ transform:scale(1.35); }
+    60%{ transform:scale(0.92); }
+    100%{ transform:scale(1); }
+  }
+  .cart-fab.bump .badge{ animation:cartBump .38s ease; }
 </style>
 </head>
 <body>
@@ -345,6 +392,8 @@
     @keyframes mgSpin{ to{ transform:rotate(360deg); } }
     #pageLoader.hide{ opacity:0; visibility:hidden; pointer-events:none; }
   </style>
+
+  <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" aria-label="بدل الوضع الليلي/النهاري">🌙</button>
 
   <div class="cover" id="coverDiv">
     <div class="cover-inner">
@@ -511,7 +560,7 @@
       <a class="social-pill" id="tkLink" href="#" target="_blank" rel="noopener">🎵 TikTok</a>
     </div>
     <div class="qr-box">
-      <img id="qrCodeImg" src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://menugo.ma/dar-atlas" alt="QR Code">
+      <img id="qrCodeImg" src="" alt="QR Code">
       <div class="qtext">
         <h4>سكانيو باش توصلو للمنيو</h4>
         <p>حطو هاد الكود فوق الطاولة</p>
@@ -573,7 +622,30 @@
 <script>
   const urlParams = new URLSearchParams(window.location.search);
   const SHOP_ID = urlParams.get('shop') || 'dar-atlas';
+
+  // ===== الوضع الليلي/النهاري =====
+  const THEME_KEY = 'menugo-theme-' + SHOP_ID;
+  function applyTheme(mode){
+    document.body.classList.toggle('dark-mode', mode === 'dark');
+    document.getElementById('themeToggle').textContent = mode === 'dark' ? '☀️' : '🌙';
+  }
+  function toggleTheme(){
+    const next = document.body.classList.contains('dark-mode') ? 'light' : 'dark';
+    applyTheme(next);
+    try{ localStorage.setItem(THEME_KEY, next); }catch(e){}
+  }
+  (function initTheme(){
+    let saved = null;
+    try{ saved = localStorage.getItem(THEME_KEY); }catch(e){}
+    if(saved){ applyTheme(saved); }
+    else if(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches){ applyTheme('dark'); }
+  })();
+
   const DAY_NAMES = ['الأحد','الإثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+
+  // QR كود تلقائي كيعتمد على رابط الصفحة الحالية ديال هاد الكليان بالضبط
+  document.getElementById('qrCodeImg').src =
+    'https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=' + encodeURIComponent(location.href);
 
   function filterMenu(){
     const q = document.getElementById('searchInput').value.trim();
@@ -637,6 +709,7 @@
     if(shop.phone) document.querySelectorAll('.phone-link').forEach(a=> a.href = 'tel:' + shop.phone);
     if(shop.whatsapp) { document.querySelectorAll('.wa-link').forEach(a=> a.href = 'https://wa.me/' + shop.whatsapp.replace(/\D/g,'')); currentWhatsapp = shop.whatsapp; }
     if(shop.publicUrl) document.getElementById('qrCodeImg').src = 'https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=' + encodeURIComponent(shop.publicUrl);
+    // ملاحظة: إلا ماكانش publicUrl مسجل، الـ QR كيبقى معتمد على الرابط الحالي ديال الصفحة (تلقائياً)
 
     if(shop.address){
       const mapFrame = document.getElementById('mapFrame');
@@ -789,6 +862,9 @@
     renderCart();
     const fab = document.getElementById('cartFab');
     fab.classList.add('show');
+    fab.classList.remove('bump');
+    void fab.offsetWidth; // إعادة تشغيل الأنيميشن
+    fab.classList.add('bump');
   }
   function changeQty(name, delta){
     if(!cart[name]) return;
