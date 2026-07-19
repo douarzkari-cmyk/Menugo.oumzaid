@@ -1691,8 +1691,8 @@ window.renderQRCodeLocal = renderQRCodeLocal;
           <div class="card">
             <h3>رابط الصفحة و QR Code</h3>
             <div class="field">
-              <label>الرابط العمومي ديال المحل</label>
-              <input type="text" id="f_publicUrl" placeholder="https://menugo.ma/dar-atlas" oninput="updateQr()">
+              <label>الرابط العمومي ديال المحل (تلقائي، تقدر تبدلو غير إلا عندك domain خاص بيك)</label>
+              <input type="text" id="f_publicUrl" placeholder="كيتعمر تلقائياً" oninput="updateQr()">
             </div>
             <div class="qr-preview">
               <div id="qrImg"></div>
@@ -1743,6 +1743,11 @@ window.renderQRCodeLocal = renderQRCodeLocal;
 
 <script>
   const SHOP_ID = new URLSearchParams(location.search).get('shop') || 'dar-atlas';
+
+  function autoPublicUrl(){
+    const base = location.origin + location.pathname.replace(/admin\.html$/, '');
+    return base + 'index.html?shop=' + encodeURIComponent(SHOP_ID);
+  }
   document.getElementById('previewLink').href = 'index.html?shop=' + encodeURIComponent(SHOP_ID);
   let shop = defaultShop();
 
@@ -1772,7 +1777,7 @@ window.renderQRCodeLocal = renderQRCodeLocal;
       offers:[],
       colors:{primary:'#1b2a6b', accent:'#c89b3c'},
       dark:false,
-      publicUrl:'https://menugo.ma/dar-atlas',
+      publicUrl:'',
       adName:'', adPhone:'', adEmail:'',
       pin:'1234'
     };
@@ -1831,7 +1836,7 @@ window.renderQRCodeLocal = renderQRCodeLocal;
     document.getElementById('f_primary').value = shop.colors.primary;
     document.getElementById('f_accent').value = shop.colors.accent;
     document.getElementById('f_dark').checked = shop.dark;
-    document.getElementById('f_publicUrl').value = shop.publicUrl;
+    document.getElementById('f_publicUrl').value = shop.publicUrl || autoPublicUrl();
     document.getElementById('f_adName').value = shop.adName || '';
     document.getElementById('f_adPhone').value = shop.adPhone || '';
     document.getElementById('f_adEmail').value = shop.adEmail || '';
@@ -2142,7 +2147,7 @@ window.renderQRCodeLocal = renderQRCodeLocal;
   }
 
   function updateQr(){
-    const url = document.getElementById('f_publicUrl').value || 'https://menugo.ma/dar-atlas';
+    const url = document.getElementById('f_publicUrl').value || autoPublicUrl();
     const box = document.getElementById('qrImg');
     box.innerHTML = '';
     try{
