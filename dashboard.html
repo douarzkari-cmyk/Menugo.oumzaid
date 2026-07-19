@@ -146,9 +146,11 @@
       const base = baseUrl();
       let html = '';
       snap.forEach(doc=>{
+        if(doc.id === '_site-landing') return; // هادي إعدادات الموقع الترويجي، ماشي كليان
         const data = doc.data();
         const id = doc.id;
         const name = data.name || id;
+        const pin = data.pin || '1234';
         const publicUrl = base + 'index.html?shop=' + encodeURIComponent(id);
         html += `
           <div class="shop-card">
@@ -158,6 +160,7 @@
               <a class="admin-link" href="${base}admin.html?shop=${encodeURIComponent(id)}">⚙️ لوحة التحكم</a>
               <a class="public-link" href="${publicUrl}" target="_blank">👁️ صفحة المحل</a>
               <button class="copy-link" onclick="copyLink('${publicUrl.replace(/'/g,"\\'")}', this)">📋 نسخ الرابط</button>
+              <button class="copy-link" onclick="showPin('${escapeHtml(name).replace(/'/g,"\\'")}', '${pin}')">🔑 الكود السري</button>
             </div>
           </div>`;
       });
@@ -166,6 +169,10 @@
       console.error(e);
       wrap.innerHTML = '<div class="empty">تعذر تحميل اللائحة، تأكد من الاتصال بالأنترنت</div>';
     }
+  }
+
+  function showPin(name, pin){
+    alert('الكود السري ديال "' + name + '":\n\n' + pin);
   }
 
   function copyLink(url, btn){
