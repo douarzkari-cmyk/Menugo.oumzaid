@@ -146,7 +146,7 @@
       const base = baseUrl();
       let html = '';
       snap.forEach(doc=>{
-        if(doc.id === '_site-landing') return; // هادي إعدادات الموقع الترويجي، ماشي كليان
+        if(doc.id === 'menugo-site-config') return; // هادي إعدادات الموقع الترويجي، ماشي كليان
         const data = doc.data();
         const id = doc.id;
         const name = data.name || id;
