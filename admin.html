@@ -1482,10 +1482,11 @@ window.renderQRCodeLocal = renderQRCodeLocal;
               <input type="text" id="f_address" placeholder="مثلاً: المدينة القديمة، مراكش">
             </div>
             <div class="grid-3">
-              <div class="field"><label>Instagram</label><input type="text" id="f_ig" placeholder="@username"></div>
-              <div class="field"><label>Facebook</label><input type="text" id="f_fb" placeholder="اسم الصفحة"></div>
-              <div class="field"><label>TikTok</label><input type="text" id="f_tk" placeholder="@username"></div>
+              <div class="field"><label>Instagram</label><input type="text" id="f_ig" placeholder="رابط كامل ولا @username"></div>
+              <div class="field"><label>Facebook</label><input type="text" id="f_fb" placeholder="الصق الرابط الكامل ديال الصفحة"></div>
+              <div class="field"><label>TikTok</label><input type="text" id="f_tk" placeholder="رابط كامل ولا @username"></div>
             </div>
+            <p style="font-size:11px; color:var(--muted); margin-top:-6px;">للنتيجة الأدق: افتح صفحة الفيسبوك ديال الكليان، اضغط "مشاركة" وانسخ الرابط، والصقو هنا كامل (بحال https://facebook.com/xxxxx).</p>
             <div class="field" style="margin-top:4px;">
               <label>⭐ رابط تقييم Google (اختياري)</label>
               <input type="url" id="f_googleReview" placeholder="https://g.page/r/xxxxxxxx/review">
@@ -1537,13 +1538,16 @@ window.renderQRCodeLocal = renderQRCodeLocal;
           <div class="card">
             <h3>ألوان الصفحة</h3>
             <div class="color-row">
-              <input type="color" id="f_primary" onchange="updateThemePreview()">
+              <input type="color" id="f_primary" oninput="onColorPickerChange('f_primary')">
+              <input type="text" id="f_primary_hex" placeholder="#1b2a6b" maxlength="7" style="width:92px; padding:9px 10px; border-radius:8px; border:1px solid var(--line); background:var(--panel-2); color:var(--text); font-size:13px; direction:ltr; text-align:center;" oninput="onColorHexChange('f_primary')">
               <div class="cinfo"><b>اللون الأساسي</b><span>يستعمل فالعناوين والأزرار الرئيسية</span></div>
             </div>
             <div class="color-row">
-              <input type="color" id="f_accent" onchange="updateThemePreview()">
+              <input type="color" id="f_accent" oninput="onColorPickerChange('f_accent')">
+              <input type="text" id="f_accent_hex" placeholder="#c89b3c" maxlength="7" style="width:92px; padding:9px 10px; border-radius:8px; border:1px solid var(--line); background:var(--panel-2); color:var(--text); font-size:13px; direction:ltr; text-align:center;" oninput="onColorHexChange('f_accent')">
               <div class="cinfo"><b>لون التمييز</b><span>يستعمل فالأسعار والتفاصيل الذهبية</span></div>
             </div>
+            <p style="font-size:11px; color:var(--muted); margin-top:4px;">إلا الـ picker ديال الهاتف عطاك غير 5 ألوان محدودة، اكتب أي كود لون (hex) مباشرة فالخانة النصية بجانب الدائرة.</p>
             <div class="theme-preview" id="themePrev">محل عبدالرزاق</div>
           </div>
           <div class="card">
@@ -1723,6 +1727,8 @@ window.renderQRCodeLocal = renderQRCodeLocal;
     document.getElementById('f_tk').value = shop.social.tk;
     document.getElementById('f_primary').value = shop.colors.primary;
     document.getElementById('f_accent').value = shop.colors.accent;
+    document.getElementById('f_primary_hex').value = shop.colors.primary;
+    document.getElementById('f_accent_hex').value = shop.colors.accent;
     document.getElementById('f_dark').checked = shop.dark;
     document.getElementById('f_publicUrl').value = shop.publicUrl || autoPublicUrl();
     document.getElementById('f_adName').value = shop.adName || '';
@@ -1990,6 +1996,19 @@ window.renderQRCodeLocal = renderQRCodeLocal;
     const prev = document.getElementById('themePrev');
     prev.style.background = p; prev.style.color = a;
     prev.textContent = (document.getElementById('f_name').value || 'اسم المحل');
+  }
+
+  function onColorPickerChange(id){
+    document.getElementById(id + '_hex').value = document.getElementById(id).value;
+    updateThemePreview();
+  }
+  function onColorHexChange(id){
+    let val = document.getElementById(id + '_hex').value.trim();
+    if(!val.startsWith('#')) val = '#' + val;
+    if(/^#([0-9A-Fa-f]{6})$/.test(val)){
+      document.getElementById(id).value = val;
+      updateThemePreview();
+    }
   }
 
   async function loadStats(){

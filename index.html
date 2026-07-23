@@ -922,14 +922,27 @@
     document.getElementById('cartDrawer').classList.remove('show');
   }
 
+  function socialUrl(value, platform){
+    if(!value) return null;
+    const v = value.trim();
+    if(/^https?:\/\//i.test(v)) return v; // رابط كامل متلصق من المستخدم، نستعملوه كيفما هو
+    const handle = v.replace('@','');
+    if(platform === 'instagram') return 'https://instagram.com/' + handle;
+    if(platform === 'tiktok') return 'https://tiktok.com/@' + handle;
+    if(platform === 'facebook') return 'https://facebook.com/' + encodeURIComponent(handle);
+    return v;
+  }
   function wireSocialLinks(shop){
     const ig = document.getElementById('igLink');
     const fb = document.getElementById('fbLink');
     const tk = document.getElementById('tkLink');
     const s = (shop && shop.social) || {ig:'@abdelrazak.shop', fb:'محل عبدالرزاق', tk:'@abdelrazak.shop'};
-    if(s.ig) ig.href = 'https://instagram.com/' + s.ig.replace('@','');
-    if(s.fb) fb.href = 'https://facebook.com/' + encodeURIComponent(s.fb);
-    if(s.tk) tk.href = 'https://tiktok.com/@' + s.tk.replace('@','');
+    const igUrl = socialUrl(s.ig, 'instagram');
+    const fbUrl = socialUrl(s.fb, 'facebook');
+    const tkUrl = socialUrl(s.tk, 'tiktok');
+    if(igUrl) ig.href = igUrl;
+    if(fbUrl) fb.href = fbUrl;
+    if(tkUrl) tk.href = tkUrl;
   }
 
   function setupReveal(){
